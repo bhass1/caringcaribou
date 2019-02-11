@@ -534,6 +534,51 @@ def __security_seed_wrapper(args):
         for seed in seed_list:
             print(seed)
 
+def __security_access_wrapper(args):
+    """Wrapper used to initiate secuirty access attempts"""
+    arb_id_request = args.src
+    arb_id_response = args.dst
+    reset_type = args.reset
+    session_type = args.sess_type
+    level = args.sec_level
+
+    seed_key_list = []
+    #TODO: Allow for variable key byte lengths
+    try_key = [0x0, 0x0, 0x0]
+    try:
+        while True:
+            #Extended diagnostics
+            response = extended_session(arb_id_request, arb_id_response, session_type)
+            
+            if response is None:
+                #simple retry in-case bus wasn't awake for first request
+                response = extended_session(arb_id_request, arb_id_response, session_type)
+            #TODO: Handle negative response to second request
+
+            #Request Seed
+            response = request_seed(arb_id_request, arb_id_response, level, None, None)
+            # Decode response
+            if Iso14229_1.is_positive_response(response):
+                response = send_key(arb_id_request, arb_id_response, level+1, try_key, None)
+                #TODO: Double check this logic
+                if Iso14229_1.is_positive_response(response):
+                    print("Key accepted")
+                else:
+                    print_negative_response(response)
+                #TODO: Increment key differently
+                try_key[0] += 1
+                #seed_list.append(list_to_hex_str(response[2:]))
+            else:
+                print_negative_response(response)
+                break
+            if reset_type:
+                ecu_reset(arb_id_request, arb_id_response, reset_type, None)
+                if reset_type == Services.EcuReset.ResetType.HARD_RESET:
+                    time.sleep(0.5)
+    except KeyboardInterrupt:
+        print("Security Access cancelled")
+
+
 def extended_session(arb_id_request, arb_id_response, session_type):
     # Sanity checks
     if not Services.DiagnosticSessionControl.DiagnosticSessionType().is_valid_session(session_type):
@@ -629,7 +674,9 @@ def __parse_args(args):
   cc.py uds services 0x733 0x633
   cc.py uds ecu_reset 1 0x733 0x633
   cc.py uds testerpresent 0x733
-  cc.py uds security_seed 0x3 0x1 0x733 0x633 -r 1""")
+  cc.py uds security_seed 0x3 0x1 0x733 0x633 -r 1
+  cc.py uds security_access 0x3 0x1 0x733 0x633 -r 1
+  """)
     subparsers = parser.add_subparsers(dest="module_function")
     subparsers.required = True
 
@@ -705,6 +752,22 @@ def __parse_args(args):
             "interpreted as infinity. (default: 0)")
     parser_secseed.set_defaults(func=__security_seed_wrapper)
 
+
+    # Parser for SecuritySeedDump
+    parser_secacc = subparsers.add_parser("security_access")
+    parser_secacc.add_argument("sess_type", metavar="stype", type=parse_int_dec_or_hex,
+            help="Extended Session Type: 0x1=defaultSession; 0x2=ProgrammingSession; 0x3=extendedSession; "
+            "0x4=safetySession; 0x5 - 0x3F=ISOSAEReserved; 0x40-0x5F=OEM; 0x60-0x7E=Supplier; 0x00 & 0x7F: ISOSAEReserved")
+    parser_secacc.add_argument("sec_level", metavar="level", type=parse_int_dec_or_hex,
+            help="Security level: 0x1 - 0x41 (odd only)=OEM; 0x43 - 0x5E=ISOSAEReserved; 0x5F=EOLPyrotechnics;"
+            " 0x61 - 0x7E=Supplier; 0x00 & 0x7F: ISOSAEReserved")
+    parser_secacc.add_argument("src", type=parse_int_dec_or_hex, help="arbitration ID to transmit to")
+    parser_secacc.add_argument("dst", type=parse_int_dec_or_hex, help="arbitration ID to listen to")
+    parser_secacc.add_argument("-r", "--reset", metavar="rtype", type=parse_int_dec_or_hex, 
+                                  help="Enable reset between security seed requests. Reset type: 1=hard,"
+                                    " 2=key off/on, 3=soft, 4=enable rapid power shutdown, "
+                                    "5=disable rapid power shutdown")
+    parser_secacc.set_defaults(func=__security_access_wrapper)
 
 
     args = parser.parse_args(args)
