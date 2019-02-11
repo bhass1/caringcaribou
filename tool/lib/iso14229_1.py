@@ -69,6 +69,50 @@ class NegativeResponseCodes(object):
     # 0xF0-0xFE Vehicle manufacturer specific conditions not correct
     # 0xFF ISO SAE Reserved
 
+    NAMES = {
+        0x00: "POSITIVE_RESPONSE",
+        0x10: "GENERAL_REJECT",
+        0x11: "SERVICE_NOT_SUPPORTED",
+        0x12: "SUB_FUNCTION_NOT_SUPPORTED",
+        0x13: "INCORRECT_MESSAGE_LENGTH_OR_INVALID_FORMAT",
+        0x14: "RESPONSE_TOO_LONG",
+        0x21: "BUSY_REPEAT_REQUEST",
+        0x22: "CONDITIONS_NOT_CORRECT",
+        0x24: "REQUEST_SEQUENCE_ERROR",
+        0x25: "NO_RESPONSE_FROM_SUBNET_COMPONENT",
+        0x26: "FAILURE_PREVENTS_EXECUTION_OF_REQUESTED_ACTION",
+        0x31: "REQUEST_OUT_OF_RANGE",
+        0x33: "SECURITY_ACCESS_DENIED",
+        0x35: "INVALID_KEY",
+        0x36: "EXCEEDED_NUMBER_OF_ATTEMPTS",
+        0x37: "REQUIRED_TIME_DELAY_NOT_EXPIRED",
+        0x70: "UPLOAD_DOWNLOAD_NOT_ACCEPTED",
+        0x71: "TRANSFER_DATA_SUSPENDED",
+        0x72: "GENERAL_PROGRAMMING_FAILURE",
+        0x73: "WRONG_BLOCK_SEQUENCE_COUNTER",
+        0x78: "REQUEST_CORRECTLY_RECEIVED_RESPONSE_PENDING",
+        0x7E: "SUB_FUNCTION_NOT_SUPPORTED_IN_ACTIVE_SESSION",
+        0x7F: "SERVICE_NOT_SUPPORTED_IN_ACTIVE_SESSION",
+        0x81: "RPM_TOO_HIGH",
+        0x82: "RPM_TOO_LOW",
+        0x83: "ENGINE_IS_RUNNING",
+        0x84: "ENGINE_IS_NOT_RUNNING",
+        0x85: "ENGINE_RUN_TIME_TOO_LOW",
+        0x86: "TEMPERATURE_TOO_HIGH",
+        0x87: "TEMPERATURE_TOO_LOW",
+        0x88: "VEHICLE_SPEED_TOO_HIGH",
+        0x89: "VEHICLE_SPEED_TOO_LOW",
+        0x8A: "THROTTLE_PEDAL_TOO_HIGH",
+        0x8B: "THROTTLE_PEDAL_TOO_LOW",
+        0x8C: "TRANSMISSION_RANGE_NOT_IN_NEUTRAL",
+        0x8D: "TRANSMISSION_RANGE_NOT_IN_GEAR",
+        0x8F: "BRAKE_SWITCHES_NOT_CLOSED",
+        0x90: "SHIFT_LEVER_NOT_IN_PARK",
+        0x91: "TORQUE_CONVERTER_CLUTCH_LOCKED",
+        0x92: "VOLTAGE_TOO_HIGH",
+        0x93: "VOLTAGE_TOO_LOW"
+    }
+
 
 class ServiceID(object):
     """
@@ -100,11 +144,47 @@ class ServiceID(object):
     CONTROL_DTC_SETTING = 0x85
     RESPONSE_ON_EVENT = 0x86
     LINK_CONTROL = 0x87
+    
+    NAMES = {
+        0x10: "DIAGNOSTIC_SESSION_CONTROL",
+        0x11: "ECU_RESET",
+        0x14: "CLEAR_DIAGNOSTIC_INFORMATION",
+        0x19: "READ_DTC_INFORMATION",
+        0x20: "RETURN_TO_NORMAL",
+        0x22: "READ_DATA_BY_IDENTIFIER",
+        0x23: "READ_MEMORY_BY_ADDRESS",
+        0x24: "READ_SCALING_DATA_BY_IDENTIFIER",
+        0x27: "SECURITY_ACCESS",
+        0x28: "COMMUNICATION_CONTROL",
+        0x2A: "READ_DATA_BY_PERIODIC_IDENTIFIER",
+        0x2C: "DYNAMICALLY_DEFINE_DATA_IDENTIFIER",
+        0x2D: "DEFINE_PID_BY_MEMORY_ADDRESS",
+        0x2E: "WRITE_DATA_BY_IDENTIFIER",
+        0x2F: "INPUT_OUTPUT_CONTROL_BY_IDENTIFIER",
+        0x31: "ROUTINE_CONTROL",
+        0x34: "REQUEST_DOWNLOAD",
+        0x35: "REQUEST_UPLOAD",
+        0x36: "TRANSFER_DATA",
+        0x37: "REQUEST_TRANSFER_EXIT",
+        0x38: "REQUEST_FILE_TRANSFER",
+        0x3D: "WRITE_MEMORY_BY_ADDRESS",
+        0x3E: "TESTER_PRESENT",
+        0x7F: "NEGATIVE_RESPONSE",
+        0x83: "ACCESS_TIMING_PARAMETER",
+        0x84: "SECURED_DATA_TRANSMISSION",
+        0x85: "CONTROL_DTC_SETTING",
+        0x86: "RESPONSE_ON_EVENT",
+        0x87: "LINK_CONTROL"
+    }
 
 
 class BaseService(object):
     """Base class for services"""
     service_id = None
+    #0x7F is universal negative response and is always valid
+    valid_responses = [0x7F]
+    SUB_FUNC_PARAM_MIN = 0x00
+    SUB_FUNC_PARAM_MAX = 0x7f
 
 
 class Services(object):
@@ -112,8 +192,12 @@ class Services(object):
     parameters and functions"""
 
     class DiagnosticSessionControl(BaseService):
-
         service_id = ServiceID.DIAGNOSTIC_SESSION_CONTROL
+        valid_responses = [0x7F, 0x50]
+
+        #Response Format (minus CAN-TP bytes):
+        #Positive Bytes: 0x50, session_type, data1, data2, data3, data4
+        #Negative Bytes: 0x7F, service_id, NRC
 
         class DiagnosticSessionType(object):
             # 0x00 ISO SAE Reserved
@@ -122,6 +206,8 @@ class Services(object):
             EXTENDED_DIAGNOSTIC_SESSION = 0x03
             SAFETY_SYSTEM_DIAGNOSTIC_SESSION = 0x04
             # 0x05-0x3F ISO SAE Reserved
+            ISO_SAE_RESERVED_MIN = 0x05
+            ISO_SAE_RESERVED_MAX = 0x3F
             # 0x40-0x5F Vehicle manufacturer specific
             VEHICLE_MANUFACTURER_SESSION_MIN = 0x40
             VEHICLE_MANUFACTURER_SESSION_MAX = 0x5F
@@ -147,10 +233,32 @@ class Services(object):
                 else:
                     return False
 
+            NAMES = {
+                0x01: "DEFAULT_SESSION",
+                0x02: "PROGRAMMING_SESSION",
+                0x03: "EXTENDED_DIAGNOSTIC_SESSION",
+                0x04: "SAFETY_SYSTEM_DIAGNOSTIC_SESSION"
+            }
+            def get_name(self, sub_function):
+                #wipe out the suppress response bit from the passed in sub_function
+                sub_function = sub_function & 0x7f
+                if (sub_function == 0x00 or sub_function == 0x7F or 
+                        (sub_function <= self.ISO_SAE_RESERVED_MAX and 
+                        sub_function >= self.ISO_SAE_RESERVED_MIN)):
+                    return "!!ISO_SAE_RESERVED!!"
+                elif (sub_function <= self.VEHICLE_MANUFACTURER_SESSION_MAX and
+                        sub_function >= self.VEHICLE_MANUFACTURER_SESSION_MIN):
+                    return "VEHICLE_MANUFACTURER_SESSION".format(sub_function)
+                elif (sub_function <= self.SYSTEM_SUPPLIER_SESSION_MAX and 
+                        sub_function >= self.SYSTEM_SUPPLIER_SESSION_MIN):
+                    return "SYSTEM_SUPPLIER_SESSION".format(sub_function)
+                else:
+                    return self.NAMES.get(sub_function, "!!UNKNOWN_SESSION_TYPE!!")
+
     class EcuReset(BaseService):
-
         service_id = ServiceID.ECU_RESET
-
+        valid_responses = [0x7F, 0x51]
+        
         class ResetType(object):
             # 0x00 ISO SAE Reserved
             HARD_RESET = 0x01
@@ -164,8 +272,8 @@ class Services(object):
             # 0x7F ISO SAE Reserved
 
     class SecurityAccess(BaseService):
-
         service_id = ServiceID.SECURITY_ACCESS
+        valid_responses = [0x7f, 0x67]
 
         class RequestSeedOrSendKey(object):
             """
@@ -214,9 +322,8 @@ class Services(object):
                 return seed + 1
 
     class TesterPresent(BaseService):
-
         service_id = ServiceID.TESTER_PRESENT
-
+        valid_responses = [0x7F, 0x7E] 
 
 class Constants(object):
     # NR_SI (Negative Response Service Identifier) is a bit special, since it is not a service per se.

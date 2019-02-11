@@ -3,7 +3,7 @@ from lib.can_actions import auto_blacklist
 from lib.common import list_to_hex_str, parse_int_dec_or_hex
 from lib.constants import ARBITRATION_ID_MAX, ARBITRATION_ID_MAX_EXTENDED, ARBITRATION_ID_MIN
 from lib.iso15765_2 import IsoTp
-from lib.iso14229_1 import Iso14229_1, NegativeResponseCodes, Services
+from lib.iso14229_1 import Iso14229_1, NegativeResponseCodes, Services, ServiceID, BaseService
 from sys import stdout, version_info
 import argparse
 import datetime
@@ -147,10 +147,8 @@ def uds_discovery(min_id, max_id, blacklist_args, auto_blacklist_duration, delay
     sub_function = Services.DiagnosticSessionControl.DiagnosticSessionType.DEFAULT_SESSION
     session_control_data = [service_id, sub_function]
 
-    valid_session_control_responses = [0x50, 0x7F]
-
     def is_valid_response(message):
-        return len(message.data) >= 2 and message.data[1] in valid_session_control_responses
+        return len(message.data) >= 2 and message.data[1] in Services.DiagnosticSessionControl.valid_session_control_responses
 
     found_arbitration_ids = []
 
@@ -336,6 +334,80 @@ def __service_discovery_wrapper(args):
         print("Supported service 0x{0:02x}: {1}".format(service_id, service_name))
 
 
+def __service_scan_wrapper(args):
+    """Wrapper used to initiate a supported service scan"""
+    arb_id_request = args.src
+    arb_id_response = args.dst
+    service = args.service
+    timeout = args.timeout
+
+    if service == Services.DiagnosticSessionControl.service_id:
+        found_sub_functions = scan_session_control(arb_id_request, arb_id_response, timeout)
+
+        # Print results
+        if found_sub_functions:
+            for sub_func in found_sub_functions:
+                session_type = Services.DiagnosticSessionControl.DiagnosticSessionType().get_name(sub_func)
+                print("Supported service (0x{0:02x}) sub-function 0x{1:02x}: {2}".format(service, sub_func, session_type))
+    else:
+        service_name = ServiceID.NAMES.get(service_id, "Unknown service")
+        print("Service 0x{0:02x}: {1} not supported at this time...".format(service_id, service_name))
+
+
+def scan_session_control(arb_id_request, arb_id_response, timeout=None, print_results=True):
+    found_sub_funcs = []
+    timeout = 0.5
+    with IsoTp(arb_id_request=arb_id_request, arb_id_response=arb_id_response) as tp:
+        # Setup filter for incoming messages
+        tp.set_filter_single_arbitration_id(arb_id_response)
+        with Iso14229_1(tp) as uds:
+            # Set timeout
+            if timeout is not None:
+                uds.P3_CLIENT = timeout
+            try:
+                for subfunc_id in range(BaseService.SUB_FUNC_PARAM_MIN, BaseService.SUB_FUNC_PARAM_MAX + 1):
+                    if print_results:
+                        print("\rProbing service 0x{0:02x} sub-function 0x{1:02x} ({1}/{2}): found {3}".format(
+                            ServiceID.DIAGNOSTIC_SESSION_CONTROL, subfunc_id, BaseService.SUB_FUNC_PARAM_MAX, len(found_sub_funcs)), end="")
+                        stdout.flush()
+
+                    response = uds.diagnostic_session_control(subfunc_id)
+                    if response is None:
+                        # No response received
+                        #retry strategy
+                        time.sleep(1)
+                        response = uds.diagnostic_session_control(subfunc_id)
+                    # Parse response
+                    #Positive Bytes: 0x50, sub_func, data1, data2, data3, data4
+                    #Negative Bytes: 0x7F, service, NRC
+                    if Iso14229_1.is_positive_response(response):
+                        #do positive response thing
+                        if response[0] in Services.DiagnosticSessionControl.valid_responses:
+                            found_sub_funcs.append(subfunc_id)
+                            if subfunc_id == Services.DiagnosticSessionControl.DiagnosticSessionType.PROGRAMMING_SESSION:
+                                #Programming Session is special. It can only be exited by reset, default session, or timeout. 
+                                #The spec leaves it up to the implementation. This should be made more generic to try reset and
+                                #wait for timeout if default session doesn't work..
+                                time.sleep(1)
+                                uds.diagnostic_session_control(Services.DiagnosticSessionControl.DiagnosticSessionType.DEFAULT_SESSION)
+                                #uds.ecu_reset(Services.EcuReset.ResetType.HARD_RESET)
+                                time.sleep(1)
+                    else:
+                        if response[1] == ServiceID.DIAGNOSTIC_SESSION_CONTROL:
+                            #Only record sub_function if the neg response is for our service
+                            if not response[2] == NegativeResponseCodes.SUB_FUNCTION_NOT_SUPPORTED:
+                                # Any other response than "service not supported" counts
+                                print(response)
+                                print("ADDING {} to table".format(subfunc_id))
+                                found_sub_funcs.append(subfunc_id)
+                if print_results:
+                    print("\nDone!\n")
+            except KeyboardInterrupt:
+                if print_results:
+                    print("\nInterrupted by user!\n")
+    return found_sub_funcs
+
+
 def tester_present(arb_id_request, delay, duration, suppress_positive_response):
     """Sends TesterPresent messages to 'arb_id_request'. Stops automatically
     after 'duration' seconds or runs forever if this is None.
@@ -435,22 +507,29 @@ def __ecu_reset_wrapper(args):
         return
 
     # Decode response
+    decode_response(response, Services.EcuReset.service_id, reset_type)
+
+#Return 0 on positive or negative response, 1 on failure
+def decode_response(response, expected_response_id, expected_subfunc):
     if response is None:
         print("No response was received")
+        return 1
     else:
         response_length = len(response)
         if response_length == 0:
             # Empty response
             print("Received empty response")
+            return 1
         elif response_length == 1:
             # Invalid response length
             print("Received response [{0:02x}] (1 byte), expected at least 2 bytes".format(response[0], len(response)))
+            return 1
         elif Iso14229_1.is_positive_response(response):
             # Positive response handling
             response_service_id = response[0]
             subfunction = response[1]
-            expected_response_id = Iso14229_1.get_service_response_id(Services.EcuReset.service_id)
-            if response_service_id == expected_response_id and subfunction == reset_type:
+            expected_response_id = Iso14229_1.get_service_response_id(expected_response_id)
+            if response_service_id == expected_response_id and subfunction == expected_subfunc:
                 # Positive response
                 pos_msg = "Received positive response"
                 if response_length > 2:
@@ -538,7 +617,6 @@ def extended_session(arb_id_request, arb_id_response, session_type):
     # Sanity checks
     if not Services.DiagnosticSessionControl.DiagnosticSessionType().is_valid_session(session_type):
         raise ValueError("Invalid extended session type: 0x{0:02x}".format(session_type))
-
     with IsoTp(arb_id_request=arb_id_request, arb_id_response=arb_id_response) as tp:
         # Setup filter for incoming messages
         tp.set_filter_single_arbitration_id(arb_id_response)
@@ -657,6 +735,15 @@ def __parse_args(args):
     parser_info.add_argument("-t", "--timeout", metavar="T", type=float, default=TIMEOUT_SERVICES,
                              help="wait T seconds for response before timeout (default: {0})".format(TIMEOUT_SERVICES))
     parser_info.set_defaults(func=__service_discovery_wrapper)
+
+    # Parser for diagnostics service scan
+    parser_servscan = subparsers.add_parser("service_scan")
+    parser_servscan.add_argument("service", type=parse_int_dec_or_hex, help="supported service to scan")
+    parser_servscan.add_argument("src", type=parse_int_dec_or_hex, help="arbitration ID to transmit to")
+    parser_servscan.add_argument("dst", type=parse_int_dec_or_hex, help="arbitration ID to listen to")
+    parser_servscan.add_argument("-t", "--timeout", metavar="T", type=float, default=TIMEOUT_SERVICES,
+                             help="wait T seconds for response before timeout (default: {0})".format(TIMEOUT_SERVICES))
+    parser_servscan.set_defaults(func=__service_scan_wrapper)
 
     # Parser for ECU Reset
     parser_ecu_reset = subparsers.add_parser("ecu_reset")
