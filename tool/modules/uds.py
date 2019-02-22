@@ -148,7 +148,7 @@ def uds_discovery(min_id, max_id, blacklist_args, auto_blacklist_duration, delay
     session_control_data = [service_id, sub_function]
 
     def is_valid_response(message):
-        return len(message.data) >= 2 and message.data[1] in Services.DiagnosticSessionControl.valid_session_control_responses
+        return len(message.data) >= 2 and message.data[1] in Services.DiagnosticSessionControl.valid_responses
 
     found_arbitration_ids = []
 
@@ -342,21 +342,116 @@ def __service_scan_wrapper(args):
     timeout = args.timeout
 
     if service == Services.DiagnosticSessionControl.service_id:
-        found_sub_functions = scan_session_control(arb_id_request, arb_id_response, timeout)
-
+        found_sub_funcs = scan_session_control(arb_id_request, arb_id_response, timeout)
         # Print results
-        if found_sub_functions:
-            for sub_func in found_sub_functions:
+        if found_sub_funcs:
+            for sub_func in found_sub_funcs:
                 session_type = Services.DiagnosticSessionControl.DiagnosticSessionType().get_name(sub_func)
                 print("Supported service (0x{0:02x}) sub-function 0x{1:02x}: {2}".format(service, sub_func, session_type))
+    elif service == ServiceID.WRITE_MEMORY_BY_ADDRESS:
+        #First find all applicable "addressAndLengthFormatIdentifier"
+            #Do this by purposely triggering NRC 0x13 by improper total length (e.g. leave off data bytes)
+            #There are 4-bits for address and length sizes
+        #Then for each addressAndLengthFormatIdentifier, try all memory ranges
+        #record NRC
+        #print table of memory with NRCs labeled
+        #valid_memory_write
+        service_name = ServiceID.NAMES.get(service_id, "Unknown service")
+        print("Service 0x{0:02x}: {1} not supported at this time...".format(service_id, service_name))
+    elif service == ServiceID.ROUTINE_CONTROL:
+        routine_map = scan_routine_control(arb_id_request, arb_id_response)
+        if routine_map:
+            for item in routine_map:
+                print("Routine 0x{0:02x} : {1}".format(item[0], item[1]))
+
     else:
         service_name = ServiceID.NAMES.get(service_id, "Unknown service")
         print("Service 0x{0:02x}: {1} not supported at this time...".format(service_id, service_name))
 
+    '''elif service == Services.
+    TODO: Add check to direct users to services_scan_ext command
+    '''
+
+def scan_routine_control(arb_id_request, arb_id_response, timeout=None, print_results=True):
+    routine_map = []
+    with IsoTp(arb_id_request=arb_id_request, arb_id_response=arb_id_response) as tp:
+        tp.set_filter_single_arbitration_id(arb_id_response)
+        with Iso14229_1(tp) as uds:
+            if timeout is not None:
+                uds.P3_CLIENT = timeout
+            try:
+                is_retry = False
+                routine_id = 0xfd00
+                while routine_id < 0xfdff:
+                #for routine_id in range(0xfd00, 0xfdff):
+                    if print_results:
+                        print("\rProbing service 0x{0:02x} routine ID 0x{1:02x} ({1}/{2})".format(
+                            ServiceID.ROUTINE_CONTROL, routine_id, 0xffff), end="")
+                        stdout.flush()
+
+                    #purposely use sub_function that is not supported to trigger error later on
+                    #The error 0x12 - SUB_FUNCTION_NOT_SUPPORTED will tell us if the RID is supported
+                    #and whether security is being checked or not due to standard definition of error flow.
+                    response = uds.routine_control(0x0, routine_id)
+                    #Parse response
+                    #Positive Bytes: 0x71, sub_func, routine_id1, routine_id2, routineInfo, routineStatusRecord1...n
+                    #Negative Bytes: 0x7F, service, NRC
+                    if Iso14229_1.is_positive_response(response):
+                        #shouldn't get here, not supported sub_function
+                        routine_map.append([(response[2] << 8) | response[3], "?? Success ?? how"])
+                    else:
+                        if response is not None and response[1] == ServiceID.ROUTINE_CONTROL:
+                            #if request_out_range, try extended session, then go back to default session and continue scan
+                            if response[2] == NegativeResponseCodes.REQUEST_OUT_OF_RANGE:
+                                if not is_retry:
+                                    #retry in extended session
+                                    is_retry = True
+                                    #put in extended mode, set routine_id--
+                                    extended_mode_response = uds.diagnostic_session_control(
+                                            Services.DiagnosticSessionControl.DiagnosticSessionType.EXTENDED_DIAGNOSTIC_SESSION)
+                                    if Iso14229_1.is_positive_response(extended_mode_response):
+                                        continue
+                                    else:
+                                        print("Error: Couldn't enter extended mode!")
+                                        return routine_map
+                                #else:
+                                    #Because we supply bad sub_function, if REQUEST_OUT_OF_RANGE seen twice
+                                    #this RID is not supported. Do Nothing.
+                            elif response[2] == NegativeResponseCodes.SUB_FUNCTION_NOT_SUPPORTED:
+                                if is_retry:
+                                    #for shits, try with good sub_func...
+                                    second_response = uds.routine_control(0x1, routine_id, [1, 1, 1, 1, 1, 1]) 
+                                    if Iso14229_1.is_positive_response(second_response):
+                                        routine_map.append([routine_id, "SUPPORTED_NO_SECURITY"])
+                                    elif second_response is not None and second_response[1] == ServiceID.ROUTINE_CONTROL:
+                                        routine_map.append([routine_id, NegativeResponseCodes.NAMES.get(second_response[2], "Unknown NRC")])
+                                    else:
+                                        print("Error: Bad second response")
+                                        return routine_map
+                                else:
+                                    routine_map.append([routine_id, "SUPPORTED_NO_SECURITY"])
+                            elif response[2] == NegativeResponseCodes.SECURITY_ACCESS_DENIED:
+                                routine_map.append([routine_id, "SUPPORTED_SECURITY_ACCESS_DENIED"])
+                    if is_retry:
+                        is_retry = False
+                        default_mode_response = uds.diagnostic_session_control(
+                                Services.DiagnosticSessionControl.DiagnosticSessionType.DEFAULT_SESSION)
+                        if not Iso14229_1.is_positive_response(default_mode_response):
+                            print("Error: Couldn't enter default mode!")
+                            return routine_map
+                    routine_id += 1
+                if print_results:
+                    print("\nDone!\n")
+            except KeyboardInterrupt:
+                if print_results:
+                    print("\nInterrupted by user!\n")
+    return routine_map
+                        
+
+
 
 def scan_session_control(arb_id_request, arb_id_response, timeout=None, print_results=True):
     found_sub_funcs = []
-    timeout = 0.5
     with IsoTp(arb_id_request=arb_id_request, arb_id_response=arb_id_response) as tp:
         # Setup filter for incoming messages
         tp.set_filter_single_arbitration_id(arb_id_response)
@@ -393,7 +488,7 @@ def scan_session_control(arb_id_request, arb_id_response, timeout=None, print_re
                                 #uds.ecu_reset(Services.EcuReset.ResetType.HARD_RESET)
                                 time.sleep(1)
                     else:
-                        if response[1] == ServiceID.DIAGNOSTIC_SESSION_CONTROL:
+                        if response is not None and response[1] == ServiceID.DIAGNOSTIC_SESSION_CONTROL:
                             #Only record sub_function if the neg response is for our service
                             if not response[2] == NegativeResponseCodes.SUB_FUNCTION_NOT_SUPPORTED:
                                 # Any other response than "service not supported" counts
@@ -702,9 +797,10 @@ def __parse_args(args):
                                      description="""Universal Diagnostic Services module for CaringCaribou""",
                                      epilog="""Example usage:
   cc.py uds discovery
-  cc.py uds discovery -blacklist 0x123 0x456
-  cc.py uds discovery -autoblacklist 10
+  cc.py uds discovery --blacklist 0x123 0x456
+  cc.py uds discovery --autoblacklist 10
   cc.py uds services 0x733 0x633
+  cc.py uds service_scan 0x10 0x733 0x633
   cc.py uds ecu_reset 1 0x733 0x633
   cc.py uds testerpresent 0x733
   cc.py uds security_seed 0x3 0x1 0x733 0x633 -r 1""")

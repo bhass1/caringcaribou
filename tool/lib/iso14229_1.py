@@ -534,6 +534,34 @@ class Iso14229_1(object):
 
         return response
 
+    def routine_control(self, sub_func, identifier, data=None):
+        """
+        Sends a "routine control" request with optional 'data' of specified 'sub_func' to 
+        specified 'identifier'
+
+        :param sub_func: the sub-function specified for this routine control. 
+            Standard only defines 0x1 - startRoutine; 0x2 - stopRoutine; and 
+            0x3 - requestRoutineResults
+        :param identifier: 2-byte routine identifier
+        :param data: optional routine data
+        :return: Response data if successful,
+                 None otherwise
+        """
+        request = [0] * (1 + 1 + 2)
+
+        request[0] = ServiceID.ROUTINE_CONTROL
+        request[1] = sub_func & 0xff
+        request[2] = (identifier >> 8) & 0xff
+        request[3] = identifier & 0xff
+        if data is not None:
+            request += data
+
+        self.tp.send_request(request)
+        response = self.receive_response(self.P3_CLIENT)
+
+        return response
+
+
     def dynamically_define_data_identifier(self, identifier, sub_function, sub_function_arg):
         """
         Sends a "dynamically define data identifier" request for 'identifier'
@@ -612,7 +640,7 @@ class Iso14229_1(object):
         """
         service_id = ServiceID.SECURITY_ACCESS
         request = [service_id, level]
-        if data_record:
+        if data_record is not None:
             for data_record in data_record:
                 request.append(data_record)
 
