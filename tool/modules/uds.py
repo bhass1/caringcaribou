@@ -8,6 +8,7 @@ from sys import stdout, version_info
 import argparse
 import datetime
 import time
+import itertools as it
 
 # Handle large ranges efficiently in both python 2 and 3
 if version_info[0] == 2:
@@ -340,6 +341,13 @@ def __service_scan_wrapper(args):
     arb_id_response = args.dst
     service = args.service
     timeout = args.timeout
+    is_oem = args.oem
+    is_supplier = args.sss
+    min_id = args.min
+    max_id = args.max
+
+    if args.min is not None and args.max is not None and (is_oem or is_supplier):
+        print("Hey don't do that!")
 
     if service == Services.DiagnosticSessionControl.service_id:
         found_sub_funcs = scan_session_control(arb_id_request, arb_id_response, timeout)
@@ -359,7 +367,7 @@ def __service_scan_wrapper(args):
         service_name = ServiceID.NAMES.get(service_id, "Unknown service")
         print("Service 0x{0:02x}: {1} not supported at this time...".format(service_id, service_name))
     elif service == ServiceID.ROUTINE_CONTROL:
-        routine_map = scan_routine_control(arb_id_request, arb_id_response)
+        routine_map = scan_routine_control(arb_id_request, arb_id_response, timeout, is_oem, is_supplier, min_id, max_id)
         if routine_map:
             for item in routine_map:
                 print("Routine 0x{0:02x} : {1}".format(item[0], item[1]))
@@ -372,8 +380,34 @@ def __service_scan_wrapper(args):
     TODO: Add check to direct users to services_scan_ext command
     '''
 
-def scan_routine_control(arb_id_request, arb_id_response, timeout=None, print_results=True):
+
+def __ext_service_scan_wrapper(args):
+    """Wrapper used to initiate a supported service scan"""
+    arb_id_request = args.src
+    arb_id_response = args.dst
+    service = args.service
+    timeout = args.timeout
+
+def scan_routine_control(arb_id_request, arb_id_response, timeout=None, 
+        is_oem=False, is_supplier=False, min_id=None, max_id=None, print_results=True):
     routine_map = []
+    routine_id_range = []
+    if is_oem:
+        print("Scanning OEM range 0x0200 - 0xdfff\n")
+        routine_id_range = range(0x0200, 0xdfff)
+    if is_supplier:
+        print("Scanning system supplier range 0xf000 - 0xfeff\n")
+        routine_id_range = it.chain(routine_id_range, range(0xf000, 0xfeff))
+    if min_id is not None or max_id is not None:
+        if min_id is None:
+            min_id = 0x0
+        if max_id is None:
+            max_id = 0xffff
+        routine_id_range = it.chain(routine_id_range, range(min_id, max_id+1))
+    elif not is_oem and not is_supplier:
+        routine_id_range = range(0x0, 0xffff+1)
+        
+
     with IsoTp(arb_id_request=arb_id_request, arb_id_response=arb_id_response) as tp:
         tp.set_filter_single_arbitration_id(arb_id_response)
         with Iso14229_1(tp) as uds:
@@ -381,65 +415,47 @@ def scan_routine_control(arb_id_request, arb_id_response, timeout=None, print_re
                 uds.P3_CLIENT = timeout
             try:
                 is_retry = False
-                routine_id = 0xfd00
-                while routine_id < 0xfdff:
-                #for routine_id in range(0xfd00, 0xfdff):
+                for routine_id in routine_id_range:
                     if print_results:
                         print("\rProbing service 0x{0:02x} routine ID 0x{1:02x} ({1}/{2})".format(
                             ServiceID.ROUTINE_CONTROL, routine_id, 0xffff), end="")
                         stdout.flush()
 
-                    #purposely use sub_function that is not supported to trigger error later on
-                    #The error 0x12 - SUB_FUNCTION_NOT_SUPPORTED will tell us if the RID is supported
-                    #and whether security is being checked or not due to standard definition of error flow.
-                    response = uds.routine_control(0x0, routine_id)
+                    #Purposely use sub_function that is not supported (0x0) to 
+                    #trigger error handling. The error 0x12 - SUB_FUNCTION_
+                    #NOT_SUPPORTED is unique in the UDS specified error flow
+                    #Using it, we can know whether the RID is supported and
+                    #whether security is being checked or not. 
+                    #To pass min. length check, size must be at least 4,
+                    #but some min. length checks may check that optional
+                    #data is included, so give 10 bytes optional data to
+                    #ensure min-length test is passed.
+                    response = uds.routine_control(0x0, routine_id, [1, 1, 1, 1, 1, 1, 1, 1, 1, 1])
+                    if response is None:
+                        #retry
+                        response = uds.routine_control(0x0, routine_id, [1, 1, 1, 1, 1, 1, 1, 1, 1, 1])
                     #Parse response
-                    #Positive Bytes: 0x71, sub_func, routine_id1, routine_id2, routineInfo, routineStatusRecord1...n
+                    #Positive Bytes: 0x71, sub_func, routine_id1, routine_id2,
+                    #               routineInfo, routineStatusRecord1...n
                     #Negative Bytes: 0x7F, service, NRC
                     if Iso14229_1.is_positive_response(response):
                         #shouldn't get here, not supported sub_function
                         routine_map.append([(response[2] << 8) | response[3], "?? Success ?? how"])
+                        #TODO: Better error handling
                     else:
                         if response is not None and response[1] == ServiceID.ROUTINE_CONTROL:
-                            #if request_out_range, try extended session, then go back to default session and continue scan
+                            #if request_out_range, RID not supported in this mode 
                             if response[2] == NegativeResponseCodes.REQUEST_OUT_OF_RANGE:
-                                if not is_retry:
-                                    #retry in extended session
-                                    is_retry = True
-                                    #put in extended mode, set routine_id--
-                                    extended_mode_response = uds.diagnostic_session_control(
-                                            Services.DiagnosticSessionControl.DiagnosticSessionType.EXTENDED_DIAGNOSTIC_SESSION)
-                                    if Iso14229_1.is_positive_response(extended_mode_response):
-                                        continue
-                                    else:
-                                        print("Error: Couldn't enter extended mode!")
-                                        return routine_map
-                                #else:
-                                    #Because we supply bad sub_function, if REQUEST_OUT_OF_RANGE seen twice
-                                    #this RID is not supported. Do Nothing.
+                                #Because we supply bad sub_function, if REQUEST_OUT_OF_RANGE
+                                #returned, then this RID is not supported. Do Nothing.
+                                pass
                             elif response[2] == NegativeResponseCodes.SUB_FUNCTION_NOT_SUPPORTED:
-                                if is_retry:
-                                    #for shits, try with good sub_func...
-                                    second_response = uds.routine_control(0x1, routine_id, [1, 1, 1, 1, 1, 1]) 
-                                    if Iso14229_1.is_positive_response(second_response):
-                                        routine_map.append([routine_id, "SUPPORTED_NO_SECURITY"])
-                                    elif second_response is not None and second_response[1] == ServiceID.ROUTINE_CONTROL:
-                                        routine_map.append([routine_id, NegativeResponseCodes.NAMES.get(second_response[2], "Unknown NRC")])
-                                    else:
-                                        print("Error: Bad second response")
-                                        return routine_map
-                                else:
-                                    routine_map.append([routine_id, "SUPPORTED_NO_SECURITY"])
+                                #Because we supply bad sub_function, if SUB_FUNC_NOT_SUPPORTED
+                                #returned, then this RID is supported and passed security check
+                                routine_map.append([routine_id, "SUPPORTED_NO_SECURITY"])
                             elif response[2] == NegativeResponseCodes.SECURITY_ACCESS_DENIED:
+                                #If security access denied, we know RID is supported
                                 routine_map.append([routine_id, "SUPPORTED_SECURITY_ACCESS_DENIED"])
-                    if is_retry:
-                        is_retry = False
-                        default_mode_response = uds.diagnostic_session_control(
-                                Services.DiagnosticSessionControl.DiagnosticSessionType.DEFAULT_SESSION)
-                        if not Iso14229_1.is_positive_response(default_mode_response):
-                            print("Error: Couldn't enter default mode!")
-                            return routine_map
-                    routine_id += 1
                 if print_results:
                     print("\nDone!\n")
             except KeyboardInterrupt:
@@ -447,8 +463,6 @@ def scan_routine_control(arb_id_request, arb_id_response, timeout=None, print_re
                     print("\nInterrupted by user!\n")
     return routine_map
                         
-
-
 
 def scan_session_control(arb_id_request, arb_id_response, timeout=None, print_results=True):
     found_sub_funcs = []
@@ -834,12 +848,30 @@ def __parse_args(args):
 
     # Parser for diagnostics service scan
     parser_servscan = subparsers.add_parser("service_scan")
-    parser_servscan.add_argument("service", type=parse_int_dec_or_hex, help="supported service to scan")
+    parser_servscan.add_argument("service", type=parse_int_dec_or_hex, help="supported service to scan: 0x31")
     parser_servscan.add_argument("src", type=parse_int_dec_or_hex, help="arbitration ID to transmit to")
     parser_servscan.add_argument("dst", type=parse_int_dec_or_hex, help="arbitration ID to listen to")
     parser_servscan.add_argument("-t", "--timeout", metavar="T", type=float, default=TIMEOUT_SERVICES,
                              help="wait T seconds for response before timeout (default: {0})".format(TIMEOUT_SERVICES))
+    parser_servscan.add_argument("-oem", action="store_true", 
+                             help="Scan vehicle manufacturer specific ranges for applicable services")
+    parser_servscan.add_argument("-sss", action="store_true", 
+                             help="Scan system supplier specific ranges for applicable services")
+    parser_servscan.add_argument("-min", type=parse_int_dec_or_hex, default=None,
+                                  help="min value to start scanning with")
+    parser_servscan.add_argument("-max", type=parse_int_dec_or_hex, default=None,
+                                  help="max value to start scanning with")
     parser_servscan.set_defaults(func=__service_scan_wrapper)
+
+    # Parser for diagnostics service scan
+    parser_extservscan = subparsers.add_parser("ext_service_scan")
+    parser_extservscan.add_argument("service", type=parse_int_dec_or_hex, help="supported service to scan: 0x31")
+    parser_extservscan.add_argument("src", type=parse_int_dec_or_hex, help="arbitration ID to transmit to")
+    parser_extservscan.add_argument("dst", type=parse_int_dec_or_hex, help="arbitration ID to listen to")
+    parser_extservscan.add_argument("-t", "--timeout", metavar="T", type=float, default=TIMEOUT_SERVICES,
+                             help="wait T seconds for response before timeout (default: {0})".format(TIMEOUT_SERVICES))
+    parser_extservscan.set_defaults(func=__ext_service_scan_wrapper)
+
 
     # Parser for ECU Reset
     parser_ecu_reset = subparsers.add_parser("ecu_reset")
