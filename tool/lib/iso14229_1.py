@@ -7,6 +7,15 @@ class DynamicallyDefinedIdentifierArg(object):
         self.positionInSourceDataRecord = position_in_source_data_record
         self.memorySize = memory_size
 
+class InputOutputControlParameters(object):
+    """
+    ISO-14229-1 InputOutputControlParameters
+    """
+    RETURN_CONTROL_TO_ECU = 0x00
+    RESET_TO_DEFAULT = 0x01
+    FREEZE_CURRENT_STATE = 0x02
+    SHORT_TERM_ADJUSTMENT = 0x03
+    #0x04 - 0xFF ISO SAE Reserved
 
 class NegativeResponseCodes(object):
     """
@@ -325,6 +334,11 @@ class Services(object):
         service_id = ServiceID.TESTER_PRESENT
         valid_responses = [0x7F, 0x7E] 
 
+    class InputOutputControlByIdentifier(BaseService):
+        service_id = ServiceID.INPUT_OUTPUT_CONTROL_BY_IDENTIFIER
+        valid_responses = [0x7F, 0x7E] 
+
+
 class Constants(object):
     # NR_SI (Negative Response Service Identifier) is a bit special, since it is not a service per se.
     # From ISO-14229-1 specification: "The NR_SI value is co-ordinated with the SI values. The NR_SI
@@ -513,12 +527,17 @@ class Iso14229_1(object):
 
         return response
 
-    def input_output_control_by_identifier(self, identifier, data):
+    def input_output_control_by_identifier(self, did, controlOptionRecord, controlEnableMaskRecord=None):
         """
-        Sends a "input output control by identifier" request for 'data' to 'identifier'
+        Sends a "input output control by identifier" request for 'controlOptionRecord' defined for
+        the optional 'controlEnableMaskRecord' to 'did'
 
-        :param identifier: Data identifier
-        :param data: Data
+        :param did: Data Identifier for use with input/output control
+        :param controlOptionRecord: data byte array containing sets of records
+                                    containing a parameter and control state
+        :param controlEnableMaskRecord: optional one or more bytes specifying whether the 
+                                        controlOptionRecord entry shall be controlled by 
+                                        this input/output control request
         :return: Response data if successful,
                  None otherwise
         """
@@ -527,7 +546,8 @@ class Iso14229_1(object):
         request[0] = ServiceID.INPUT_OUTPUT_CONTROL_BY_IDENTIFIER
         request[1] = (identifier >> 8) & 0xFF
         request[2] = identifier & 0xFF
-        request += data
+        request += controlOptionRecord
+        request += controlEnableMaskRecord
 
         self.tp.send_request(request)
         response = self.receive_response(self.P3_CLIENT)

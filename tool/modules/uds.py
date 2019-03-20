@@ -346,6 +346,7 @@ def __service_scan_wrapper(args):
     min_id = args.min
     max_id = args.max
     try:
+        #Services available to defaultSession: SessionControl; ECUReset; TesterPresent; ResponseOnEvent; ReadDID; ReadMemory; ReadScalingData; DynamicallyDefineDID; WriteDID; WriteMemory; ClearDiagnosticInfo; ReadDTCInfo; RoutineControl.
         if service == Services.DiagnosticSessionControl.service_id:
             found_sub_funcs = scan_session_control(arb_id_request, arb_id_response, timeout)
             # Print results
@@ -384,11 +385,129 @@ def __service_scan_wrapper(args):
 
 
 def __ext_service_scan_wrapper(args):
-    """Wrapper used to initiate a supported service scan"""
+    """Wrapper used to initiate a supported extended service scan"""
     arb_id_request = args.src
     arb_id_response = args.dst
     service = args.service
     timeout = args.timeout
+    is_oem = args.oem
+    is_supplier = args.sss
+    min_id = args.min
+    max_id = args.max
+    try:
+        if service == Services.InputOutputControlByIdentifier.service_id:
+            found_iocontrols = scan_io_controls(arb_id_request, arb_id_response, timeout, is_oem, is_supplier, min_id, max_id)
+    except ValueError as e:
+        print("\n Extended Service Scan failed: {0}".format(e))
+
+def scan_io_controls(arb_id_request, arb_id_response, timeout=None,
+        is_oem=False, is_supplier=False, min_id=None, max_id=None, print_results=True):
+    #TODO: Implement function to scan io controls
+'''    The server shall send a positive response message to a request message with an
+inputOutputControlParameter of returnControlToECU even if the dataIdentifier is currently not under tester
+control.
+In addition, when receiving a returnControlToECU request, a server shall always provide the client the
+capability of setting the controlMask (if supported) bits all to '1' in order to return control of a packeted or bitmapped
+dataIdentifier completely back to the ECU.
+
+Uses DIDs.
+
+IOCtrl Params:
+    0x00 - returnControlToECU
+    This value shall indicate to the server that the client does no longer
+    have control about the input signal(s), internal parameter(s) and/or
+    output signal(s) referenced by the dataIdentifier.
+    Details of controlState bytes in request: 0 bytes
+    Details of controlState bytes in positive response: Equal to the size
+    and format of the dataIdentifier's dataRecord
+
+    0x01 - resetToDefault
+    This value shall indicate to the server that it is requested to reset the
+    input signal(s), internal parameter(s) and/or output signal(s)
+    referenced by the dataIdentifier to its default state.
+    Details of controlState bytes in request: 0 bytes
+    Details of controlState bytes in positive. response: Equal to the size
+    and format of the dataIdentifier's dataRecord
+
+    0x02 - freezeCurrentState
+    This value shall indicate to the server that it is requested to freeze the
+    current state of the input signal(s), internal parameter(s) and/or output
+    signal referenced by the dataIdentifier.
+    Details of controlState bytes in request: 0 bytes
+    Details of controlState bytes in positive. response: Equal to the size
+    and format of the dataIdentifier's dataRecord
+
+    0x03 - shortTermAdjustment
+    This value shall indicate to the server that it is requested to adjust the
+    input signal(s), internal parameter(s) and/or controlled output signal(s)
+    referenced by the dataIdentifier in RAM to the value(s) included in the
+    controlOption parameter(s) (e.g., set Idle Air Control Valve to a
+    specific step number, set pulse width of valve to a specific value/duty
+    cycle).
+    Details of controlState bytes in request: Equal to the size and format
+    of the dataIdentifier's dataRecord
+    Details of controlState bytes in pos. response: Equal to the size and
+    format of the dataIdentifier's dataRecord
+
+    0x04 - 0xFF ISOSAEReserved 
+    This value is reserved by this document for future definition.
+
+    OEM - 0x0100 - 0xA5FF; 0xA800 - 0xACFF; 0xB000 - 0xB1FF; 0xC2000 - 0xC2FF; 0xCF00 - 0xEFFF; 
+    SAF - 0xFA00 - 0xFA0F (airbags); 0xFA19 - 0xFAFF
+    SSS - 0xFD00 - 0xFEFF
+
+'''
+    io_control_list = []
+    id_scan_range = make_did_range(is_oem, is_supplier, min_id, max_id)
+
+    with IsoTp(arb_id_request=arb_id_request, arb_id_response=arb_id_response) as tp:
+        tp.set_filter_single_arbitration_id(arb_id_response)
+        with Iso14229_1(tp) as uds:
+            if timeout is not None:
+                uds.P3_CLIENT = timeout
+            try:
+                for did in id_scan_range:
+                    if print_results:
+                        print("\rProbing service 0x{0:02x} routine ID 0x{1:02x} ({1}/{2})".format(
+                            ServiceID.ROUTINE_CONTROL, did, 0xffff), end="")
+                        stdout.flush()
+
+                    response = uds.input_output_control_by_identifier(did, [1, 1, 1, 1, 1, 1, 1, 1, 1, 1])
+                    if response is None:
+                        #retry
+                        response = uds.routine_control(0x0, routine_id, [1, 1, 1, 1, 1, 1, 1, 1, 1, 1])
+
+            except KeyboardInterrupt:
+                if print_results:
+                    print("Interrupted by user!")
+
+    return io_control_list
+
+def make_did_range(is_oem, is_supplier, min_id=None, max_id=None):
+    id_range = []
+    if is_oem:
+        print("Scanning OEM range 0x0200 - 0xdfff")
+        id_range = it.chain(range(0x0100, 0xA5FF), 
+                range(0xA800, 0xACFF), range(0xB000, 0xB1FF), 
+                range(0xC200, 0xC2FF), range(0xCF00, 0xEFFF))
+        #get_oem_range(RID / DID)
+    if is_supplier:
+        print("Scanning system supplier range 0xf000 - 0xfeff")
+        #TODO get_sss_range(RID / DID)
+        id_range = it.chain(id_range, range(0xf000, 0xfeff))
+    if min_id is not None or max_id is not None:
+        if min_id > max_id:
+            raise ValueError("Can't have MIN > MAX")
+        if min_id is None or min_id < 0:
+            min_id = 0x0
+        if max_id is None or max_id > 0xffff:
+            max_id = 0xffff
+        print("Scanning custom range 0x{0:02x} - 0x{1:02x}".format(min_id, max_id))
+        id_range = it.chain(id_range, range(min_id, max_id+1))
+    elif not is_oem and not is_supplier:
+        id_range = range(0x0, 0xffff+1)
+
+    return id_range
 
 def scan_routine_control(arb_id_request, arb_id_response, timeout=None, 
         is_oem=False, is_supplier=False, min_id=None, max_id=None, print_results=True):
@@ -419,7 +538,6 @@ def scan_routine_control(arb_id_request, arb_id_response, timeout=None,
             if timeout is not None:
                 uds.P3_CLIENT = timeout
             try:
-                is_retry = False
                 for routine_id in routine_id_range:
                     if print_results:
                         print("\rProbing service 0x{0:02x} routine ID 0x{1:02x} ({1}/{2})".format(
