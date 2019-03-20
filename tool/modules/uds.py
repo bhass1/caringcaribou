@@ -345,40 +345,42 @@ def __service_scan_wrapper(args):
     is_supplier = args.sss
     min_id = args.min
     max_id = args.max
+    try:
+        if service == Services.DiagnosticSessionControl.service_id:
+            found_sub_funcs = scan_session_control(arb_id_request, arb_id_response, timeout)
+            # Print results
+            if found_sub_funcs:
+                for sub_func in found_sub_funcs:
+                    session_type = Services.DiagnosticSessionControl.DiagnosticSessionType().get_name(sub_func)
+                    print("Supported service (0x{0:02x}) sub-function 0x{1:02x}: {2}".format(service, sub_func, session_type))
+        elif service == ServiceID.WRITE_MEMORY_BY_ADDRESS:
+            #First find all applicable "addressAndLengthFormatIdentifier"
+                #Do this by purposely triggering NRC 0x13 by improper total length (e.g. leave off data bytes)
+                #There are 4-bits for address and length sizes
+            #Then for each addressAndLengthFormatIdentifier, try all memory ranges
+            #record NRC
+            #print table of memory with NRCs labeled
+            #valid_memory_write
+            service_name = ServiceID.NAMES.get(service_id, "Unknown service")
+            print("Service 0x{0:02x}: {1} not supported at this time...".format(service_id, service_name))
+        elif service == ServiceID.ROUTINE_CONTROL:
+            print("Routine Control Scan")
+            routine_map = scan_routine_control(arb_id_request, arb_id_response, timeout, is_oem, is_supplier, min_id, max_id)
+            if routine_map:
+                for item in routine_map:
+                    print("Routine 0x{0:02x} : {1}".format(item[0], item[1]))
+            else:
+                print("No supported routines found in scan")
 
-    if args.min is not None and args.max is not None and (is_oem or is_supplier):
-        print("Hey don't do that!")
+        else:
+            service_name = ServiceID.NAMES.get(service_id, "Unknown service")
+            print("Service 0x{0:02x}: {1} not supported at this time...".format(service_id, service_name))
 
-    if service == Services.DiagnosticSessionControl.service_id:
-        found_sub_funcs = scan_session_control(arb_id_request, arb_id_response, timeout)
-        # Print results
-        if found_sub_funcs:
-            for sub_func in found_sub_funcs:
-                session_type = Services.DiagnosticSessionControl.DiagnosticSessionType().get_name(sub_func)
-                print("Supported service (0x{0:02x}) sub-function 0x{1:02x}: {2}".format(service, sub_func, session_type))
-    elif service == ServiceID.WRITE_MEMORY_BY_ADDRESS:
-        #First find all applicable "addressAndLengthFormatIdentifier"
-            #Do this by purposely triggering NRC 0x13 by improper total length (e.g. leave off data bytes)
-            #There are 4-bits for address and length sizes
-        #Then for each addressAndLengthFormatIdentifier, try all memory ranges
-        #record NRC
-        #print table of memory with NRCs labeled
-        #valid_memory_write
-        service_name = ServiceID.NAMES.get(service_id, "Unknown service")
-        print("Service 0x{0:02x}: {1} not supported at this time...".format(service_id, service_name))
-    elif service == ServiceID.ROUTINE_CONTROL:
-        routine_map = scan_routine_control(arb_id_request, arb_id_response, timeout, is_oem, is_supplier, min_id, max_id)
-        if routine_map:
-            for item in routine_map:
-                print("Routine 0x{0:02x} : {1}".format(item[0], item[1]))
-
-    else:
-        service_name = ServiceID.NAMES.get(service_id, "Unknown service")
-        print("Service 0x{0:02x}: {1} not supported at this time...".format(service_id, service_name))
-
-    '''elif service == Services.
-    TODO: Add check to direct users to services_scan_ext command
-    '''
+        '''elif service == Services.
+        TODO: Add check to direct users to services_scan_ext command
+        '''
+    except ValueError as e:
+        print("\nService Scan failed: {0}".format(e))
 
 
 def __ext_service_scan_wrapper(args):
@@ -393,16 +395,19 @@ def scan_routine_control(arb_id_request, arb_id_response, timeout=None,
     routine_map = []
     routine_id_range = []
     if is_oem:
-        print("Scanning OEM range 0x0200 - 0xdfff\n")
+        print("Scanning OEM range 0x0200 - 0xdfff")
         routine_id_range = range(0x0200, 0xdfff)
     if is_supplier:
-        print("Scanning system supplier range 0xf000 - 0xfeff\n")
+        print("Scanning system supplier range 0xf000 - 0xfeff")
         routine_id_range = it.chain(routine_id_range, range(0xf000, 0xfeff))
     if min_id is not None or max_id is not None:
-        if min_id is None:
+        if min_id > max_id:
+            raise ValueError("Can't have MIN > MAX")
+        if min_id is None or min_id < 0:
             min_id = 0x0
-        if max_id is None:
+        if max_id is None or max_id > 0xffff:
             max_id = 0xffff
+        print("Scanning custom range 0x{0:02x} - 0x{1:02x}".format(min_id, max_id))
         routine_id_range = it.chain(routine_id_range, range(min_id, max_id+1))
     elif not is_oem and not is_supplier:
         routine_id_range = range(0x0, 0xffff+1)
