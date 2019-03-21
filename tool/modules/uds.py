@@ -3,7 +3,7 @@ from lib.can_actions import auto_blacklist
 from lib.common import list_to_hex_str, parse_int_dec_or_hex
 from lib.constants import ARBITRATION_ID_MAX, ARBITRATION_ID_MAX_EXTENDED, ARBITRATION_ID_MIN
 from lib.iso15765_2 import IsoTp
-from lib.iso14229_1 import Iso14229_1, NegativeResponseCodes, Services, ServiceID, BaseService
+from lib.iso14229_1 import Iso14229_1, NegativeResponseCodes, Services, ServiceID, BaseService, InputOutputControlParameters
 from sys import stdout, version_info
 import argparse
 import datetime
@@ -417,55 +417,8 @@ def __ext_service_scan_wrapper(args):
 def scan_io_controls(arb_id_request, arb_id_response, timeout=None,
         is_oem=False, is_supplier=False, is_safety=None, min_id=None, 
         max_id=None, print_results=True):
-    """    The server shall send a positive response message to a request message with an
-    inputOutputControlParameter of returnControlToECU even if the dataIdentifier is currently not under tester
-    control.
-    In addition, when receiving a returnControlToECU request, a server shall always provide the client the
-    capability of setting the controlMask (if supported) bits all to '1' in order to return control of a packeted or bitmapped
-    dataIdentifier completely back to the ECU.
-    
+    """
     Uses DIDs.
-    
-    IOCtrl Params:
-        0x00 - returnControlToECU
-        This value shall indicate to the server that the client does no longer
-        have control about the input signal(s), internal parameter(s) and/or
-        output signal(s) referenced by the dataIdentifier.
-        Details of controlState bytes in request: 0 bytes
-        Details of controlState bytes in positive response: Equal to the size
-        and format of the dataIdentifier's dataRecord
-    
-        0x01 - resetToDefault
-        This value shall indicate to the server that it is requested to reset the
-        input signal(s), internal parameter(s) and/or output signal(s)
-        referenced by the dataIdentifier to its default state.
-        Details of controlState bytes in request: 0 bytes
-        Details of controlState bytes in positive. response: Equal to the size
-        and format of the dataIdentifier's dataRecord
-    
-        0x02 - freezeCurrentState
-        This value shall indicate to the server that it is requested to freeze the
-        current state of the input signal(s), internal parameter(s) and/or output
-        signal referenced by the dataIdentifier.
-        Details of controlState bytes in request: 0 bytes
-        Details of controlState bytes in positive. response: Equal to the size
-        and format of the dataIdentifier's dataRecord
-    
-        0x03 - shortTermAdjustment
-        This value shall indicate to the server that it is requested to adjust the
-        input signal(s), internal parameter(s) and/or controlled output signal(s)
-        referenced by the dataIdentifier in RAM to the value(s) included in the
-        controlOption parameter(s) (e.g., set Idle Air Control Valve to a
-        specific step number, set pulse width of valve to a specific value/duty
-        cycle).
-        Details of controlState bytes in request: Equal to the size and format
-        of the dataIdentifier's dataRecord
-        Details of controlState bytes in pos. response: Equal to the size and
-        format of the dataIdentifier's dataRecord
-    
-        0x04 - 0xFF ISOSAEReserved 
-        This value is reserved by this document for future definition.
-    
         OEM - 0x0100 - 0xA5FF; 0xA800 - 0xACFF; 0xB000 - 0xB1FF; 0xC2000 - 0xC2FF; 0xCF00 - 0xEFFF; 
         SAF - 0xFA00 - 0xFA0F (airbags); 0xFA19 - 0xFAFF
         SSS - 0xFD00 - 0xFEFF
@@ -489,11 +442,11 @@ def scan_io_controls(arb_id_request, arb_id_response, timeout=None,
                     ## controlMask is one or many bytes.
                     ### Start with 0, for every 0x13, increase by 1 byte until not 0x13 error.
                     # BAD_LENGTH (0x13) indicates a retry.
-                    # NOT_SUPPORTED (0x31) indicates not supported.
-                    # Security check indicates security enabled, and supported
-                    # Positive response indicates supported, no security
-                    # Other NRCs indicate supported.
-                    controlOptionRecord = [0x00]
+                    # DONE __ NOT_SUPPORTED (0x31) indicates not supported.
+                    # DONE __ Security check indicates security enabled, and supported
+                    # DONE __ Positive response indicates supported, no security
+                    # DONE __ Other NRCs indicate supported.
+                    controlOptionRecord = [InputOutputControlParameters.RETURN_CONTROL_TO_ECU]
                     controlEnableMaskRecord = []
                     response = uds.input_output_control_by_identifier(did,
                                 controlOptionRecord, controlEnableMaskRecord) 
@@ -505,6 +458,16 @@ def scan_io_controls(arb_id_request, arb_id_response, timeout=None,
                     else:
                         #TODO: What is the subfunction value??
                         decode_response(response, ServiceID.INPUT_OUTPUT_CONTROL_BY_IDENTIFIER, 0)
+                        if response[2] is NegativeResponseCodes.INCORRECT_MESSAGE_LENGTH_OR_INVALID_FORMAT:
+                            #Increase controlEnableMaskRecord and RETRY 
+                            #TODO: Establish retry strategy 
+                        elif response[2] is NegativeResponseCodes.REQUEST_OUT_OF_RANGE:
+                            #Do nothing. Not supported.
+                            pass
+                        elif response[2] is NegativeResponseCodes.SECURITY_ACCESS_DENIED:
+                            io_control_list.append([routine_id, "SUPPORTED_SECURITY_ACCESS_DENIED"])
+                        else:
+                            io_control_list.append([did, "SUPPORTED_NO_SECURITY"])
             except KeyboardInterrupt:
                 if print_results:
                     print("Interrupted by user!")

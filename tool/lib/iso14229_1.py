@@ -10,6 +10,44 @@ class DynamicallyDefinedIdentifierArg(object):
 class InputOutputControlParameters(object):
     """
     ISO-14229-1 InputOutputControlParameters
+        0x00 - returnControlToECU
+        This value shall indicate to the server that the client does no longer
+        have control about the input signal(s), internal parameter(s) and/or
+        output signal(s) referenced by the dataIdentifier.
+        Details of controlState bytes in request: 0 bytes
+        Details of controlState bytes in positive response: Equal to the size
+        and format of the dataIdentifier's dataRecord
+    
+        0x01 - resetToDefault
+        This value shall indicate to the server that it is requested to reset the
+        input signal(s), internal parameter(s) and/or output signal(s)
+        referenced by the dataIdentifier to its default state.
+        Details of controlState bytes in request: 0 bytes
+        Details of controlState bytes in positive. response: Equal to the size
+        and format of the dataIdentifier's dataRecord
+    
+        0x02 - freezeCurrentState
+        This value shall indicate to the server that it is requested to freeze the
+        current state of the input signal(s), internal parameter(s) and/or output
+        signal referenced by the dataIdentifier.
+        Details of controlState bytes in request: 0 bytes
+        Details of controlState bytes in positive. response: Equal to the size
+        and format of the dataIdentifier's dataRecord
+    
+        0x03 - shortTermAdjustment
+        This value shall indicate to the server that it is requested to adjust the
+        input signal(s), internal parameter(s) and/or controlled output signal(s)
+        referenced by the dataIdentifier in RAM to the value(s) included in the
+        controlOption parameter(s) (e.g., set Idle Air Control Valve to a
+        specific step number, set pulse width of valve to a specific value/duty
+        cycle).
+        Details of controlState bytes in request: Equal to the size and format
+        of the dataIdentifier's dataRecord
+        Details of controlState bytes in pos. response: Equal to the size and
+        format of the dataIdentifier's dataRecord
+    
+        0x04 - 0xFF ISOSAEReserved 
+        This value is reserved by this document for future definition.
     """
     RETURN_CONTROL_TO_ECU = 0x00
     RESET_TO_DEFAULT = 0x01
