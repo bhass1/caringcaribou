@@ -458,7 +458,7 @@ IOCtrl Params:
 
 '''
     io_control_list = []
-    id_scan_range = make_did_range(is_oem, is_supplier, min_id, max_id)
+    id_scan_range = make_did_range(is_oem, is_supplier, is_safety, min_id, max_id)
 
     with IsoTp(arb_id_request=arb_id_request, arb_id_response=arb_id_response) as tp:
         tp.set_filter_single_arbitration_id(arb_id_response)
@@ -483,18 +483,25 @@ IOCtrl Params:
 
     return io_control_list
 
-def make_did_range(is_oem, is_supplier, min_id=None, max_id=None):
+def make_did_range(is_oem, is_supplier, is_safety, min_id=None, max_id=None):
     id_range = []
     if is_oem:
-        print("Scanning OEM range 0x0200 - 0xdfff")
-        id_range = it.chain(range(0x0100, 0xA5FF), 
-                range(0xA800, 0xACFF), range(0xB000, 0xB1FF), 
-                range(0xC200, 0xC2FF), range(0xCF00, 0xEFFF))
+        print("Scanning OEM ranges: \n\t0x0100 - 0xa5ff"
+                "\n\t0xa800 - 0xacff\n\t0xb000 - 0xb1ff"
+                "\n\t0xc200 - 0xc2ff\n\t0xcf00 - 0xefff")
+        id_range = it.chain(range(0x0100, 0xA5FF+1), 
+                range(0xA800, 0xACFF+1), range(0xB000, 0xB1FF+1), 
+                range(0xC200, 0xC2FF+1), range(0xCF00, 0xEFFF+1))
         #get_oem_range(RID / DID)
     if is_supplier:
         print("Scanning system supplier range 0xf000 - 0xfeff")
         #TODO get_sss_range(RID / DID)
-        id_range = it.chain(id_range, range(0xf000, 0xfeff))
+        id_range = it.chain(id_range, range(0xf000, 0xfeff+1))
+    if is_safety:
+        print("Scanning safety system ranges: \n\t0xfa00 - 0xfa0f
+                \n\t0xfa19 - 0xfaff")
+        #TODO get_sss_range(RID / DID)
+        id_range = it.chain(id_range, range(0xf000, 0xfeff+1), range(0xfa19,0xfaff+1))
     if min_id is not None or max_id is not None:
         if min_id > max_id:
             raise ValueError("Can't have MIN > MAX")
@@ -505,6 +512,7 @@ def make_did_range(is_oem, is_supplier, min_id=None, max_id=None):
         print("Scanning custom range 0x{0:02x} - 0x{1:02x}".format(min_id, max_id))
         id_range = it.chain(id_range, range(min_id, max_id+1))
     elif not is_oem and not is_supplier:
+        print("Scanning default range 0x{0:02x} - 0x{1:02x}".format(0x0, 0xffff))
         id_range = range(0x0, 0xffff+1)
 
     return id_range
@@ -515,10 +523,10 @@ def scan_routine_control(arb_id_request, arb_id_response, timeout=None,
     routine_id_range = []
     if is_oem:
         print("Scanning OEM range 0x0200 - 0xdfff")
-        routine_id_range = range(0x0200, 0xdfff)
+        routine_id_range = range(0x0200, 0xdfff+1)
     if is_supplier:
         print("Scanning system supplier range 0xf000 - 0xfeff")
-        routine_id_range = it.chain(routine_id_range, range(0xf000, 0xfeff))
+        routine_id_range = it.chain(routine_id_range, range(0xf000, 0xfeff+1))
     if min_id is not None or max_id is not None:
         if min_id > max_id:
             raise ValueError("Can't have MIN > MAX")

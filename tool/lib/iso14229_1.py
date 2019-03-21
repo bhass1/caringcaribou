@@ -547,7 +547,8 @@ class Iso14229_1(object):
         request[1] = (identifier >> 8) & 0xFF
         request[2] = identifier & 0xFF
         request += controlOptionRecord
-        request += controlEnableMaskRecord
+	if controlEnableMaskRecord is not None:
+        	request += controlEnableMaskRecord
 
         self.tp.send_request(request)
         response = self.receive_response(self.P3_CLIENT)
