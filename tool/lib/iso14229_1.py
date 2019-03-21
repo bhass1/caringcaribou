@@ -544,11 +544,11 @@ class Iso14229_1(object):
         request = [0] * (1 + 2)
 
         request[0] = ServiceID.INPUT_OUTPUT_CONTROL_BY_IDENTIFIER
-        request[1] = (identifier >> 8) & 0xFF
-        request[2] = identifier & 0xFF
+        request[1] = (did>> 8) & 0xFF
+        request[2] = did & 0xFF
         request += controlOptionRecord
-	if controlEnableMaskRecord is not None:
-        	request += controlEnableMaskRecord
+        if controlEnableMaskRecord is not None:
+            request += controlEnableMaskRecord
 
         self.tp.send_request(request)
         response = self.receive_response(self.P3_CLIENT)

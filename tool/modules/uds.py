@@ -342,6 +342,7 @@ def __service_scan_wrapper(args):
     service = args.service
     timeout = args.timeout
     is_oem = args.oem
+    is_safety = args.saf
     is_supplier = args.sss
     min_id = args.min
     max_id = args.max
@@ -366,6 +367,7 @@ def __service_scan_wrapper(args):
             print("Service 0x{0:02x}: {1} not supported at this time...".format(service_id, service_name))
         elif service == ServiceID.ROUTINE_CONTROL:
             print("Routine Control Scan")
+            #TODO : Add safety ranges for routine control
             routine_map = scan_routine_control(arb_id_request, arb_id_response, timeout, is_oem, is_supplier, min_id, max_id)
             if routine_map:
                 for item in routine_map:
@@ -392,71 +394,82 @@ def __ext_service_scan_wrapper(args):
     timeout = args.timeout
     is_oem = args.oem
     is_supplier = args.sss
+    is_safety = args.saf
     min_id = args.min
     max_id = args.max
     try:
+        #Set to extended mode
+        response = extended_session(arb_id_request, arb_id_response)
+        if not decode_response(response, Services.DiagnosticSessionControl.service_id, 
+            Services.DiagnosticSessionControl.DiagnosticSessionType.EXTENDED_DIAGNOSTIC_SESSION):
+            if not Iso14229_1.is_positive_response(response):
+                raise ValueError("Unable to enter extended session")
+            else:
+                print("Entered extended session")
+        else:
+            raise ValueError("Unable to enter extended session")
         if service == Services.InputOutputControlByIdentifier.service_id:
-            found_iocontrols = scan_io_controls(arb_id_request, arb_id_response, timeout, is_oem, is_supplier, min_id, max_id)
+            found_iocontrols = scan_io_controls(arb_id_request, arb_id_response,
+                 timeout, is_oem, is_supplier, is_safety, min_id, max_id)
     except ValueError as e:
         print("\n Extended Service Scan failed: {0}".format(e))
 
 def scan_io_controls(arb_id_request, arb_id_response, timeout=None,
-        is_oem=False, is_supplier=False, min_id=None, max_id=None, print_results=True):
-    #TODO: Implement function to scan io controls
-'''    The server shall send a positive response message to a request message with an
-inputOutputControlParameter of returnControlToECU even if the dataIdentifier is currently not under tester
-control.
-In addition, when receiving a returnControlToECU request, a server shall always provide the client the
-capability of setting the controlMask (if supported) bits all to '1' in order to return control of a packeted or bitmapped
-dataIdentifier completely back to the ECU.
-
-Uses DIDs.
-
-IOCtrl Params:
-    0x00 - returnControlToECU
-    This value shall indicate to the server that the client does no longer
-    have control about the input signal(s), internal parameter(s) and/or
-    output signal(s) referenced by the dataIdentifier.
-    Details of controlState bytes in request: 0 bytes
-    Details of controlState bytes in positive response: Equal to the size
-    and format of the dataIdentifier's dataRecord
-
-    0x01 - resetToDefault
-    This value shall indicate to the server that it is requested to reset the
-    input signal(s), internal parameter(s) and/or output signal(s)
-    referenced by the dataIdentifier to its default state.
-    Details of controlState bytes in request: 0 bytes
-    Details of controlState bytes in positive. response: Equal to the size
-    and format of the dataIdentifier's dataRecord
-
-    0x02 - freezeCurrentState
-    This value shall indicate to the server that it is requested to freeze the
-    current state of the input signal(s), internal parameter(s) and/or output
-    signal referenced by the dataIdentifier.
-    Details of controlState bytes in request: 0 bytes
-    Details of controlState bytes in positive. response: Equal to the size
-    and format of the dataIdentifier's dataRecord
-
-    0x03 - shortTermAdjustment
-    This value shall indicate to the server that it is requested to adjust the
-    input signal(s), internal parameter(s) and/or controlled output signal(s)
-    referenced by the dataIdentifier in RAM to the value(s) included in the
-    controlOption parameter(s) (e.g., set Idle Air Control Valve to a
-    specific step number, set pulse width of valve to a specific value/duty
-    cycle).
-    Details of controlState bytes in request: Equal to the size and format
-    of the dataIdentifier's dataRecord
-    Details of controlState bytes in pos. response: Equal to the size and
-    format of the dataIdentifier's dataRecord
-
-    0x04 - 0xFF ISOSAEReserved 
-    This value is reserved by this document for future definition.
-
-    OEM - 0x0100 - 0xA5FF; 0xA800 - 0xACFF; 0xB000 - 0xB1FF; 0xC2000 - 0xC2FF; 0xCF00 - 0xEFFF; 
-    SAF - 0xFA00 - 0xFA0F (airbags); 0xFA19 - 0xFAFF
-    SSS - 0xFD00 - 0xFEFF
-
-'''
+        is_oem=False, is_supplier=False, is_safety=None, min_id=None, 
+        max_id=None, print_results=True):
+    """    The server shall send a positive response message to a request message with an
+    inputOutputControlParameter of returnControlToECU even if the dataIdentifier is currently not under tester
+    control.
+    In addition, when receiving a returnControlToECU request, a server shall always provide the client the
+    capability of setting the controlMask (if supported) bits all to '1' in order to return control of a packeted or bitmapped
+    dataIdentifier completely back to the ECU.
+    
+    Uses DIDs.
+    
+    IOCtrl Params:
+        0x00 - returnControlToECU
+        This value shall indicate to the server that the client does no longer
+        have control about the input signal(s), internal parameter(s) and/or
+        output signal(s) referenced by the dataIdentifier.
+        Details of controlState bytes in request: 0 bytes
+        Details of controlState bytes in positive response: Equal to the size
+        and format of the dataIdentifier's dataRecord
+    
+        0x01 - resetToDefault
+        This value shall indicate to the server that it is requested to reset the
+        input signal(s), internal parameter(s) and/or output signal(s)
+        referenced by the dataIdentifier to its default state.
+        Details of controlState bytes in request: 0 bytes
+        Details of controlState bytes in positive. response: Equal to the size
+        and format of the dataIdentifier's dataRecord
+    
+        0x02 - freezeCurrentState
+        This value shall indicate to the server that it is requested to freeze the
+        current state of the input signal(s), internal parameter(s) and/or output
+        signal referenced by the dataIdentifier.
+        Details of controlState bytes in request: 0 bytes
+        Details of controlState bytes in positive. response: Equal to the size
+        and format of the dataIdentifier's dataRecord
+    
+        0x03 - shortTermAdjustment
+        This value shall indicate to the server that it is requested to adjust the
+        input signal(s), internal parameter(s) and/or controlled output signal(s)
+        referenced by the dataIdentifier in RAM to the value(s) included in the
+        controlOption parameter(s) (e.g., set Idle Air Control Valve to a
+        specific step number, set pulse width of valve to a specific value/duty
+        cycle).
+        Details of controlState bytes in request: Equal to the size and format
+        of the dataIdentifier's dataRecord
+        Details of controlState bytes in pos. response: Equal to the size and
+        format of the dataIdentifier's dataRecord
+    
+        0x04 - 0xFF ISOSAEReserved 
+        This value is reserved by this document for future definition.
+    
+        OEM - 0x0100 - 0xA5FF; 0xA800 - 0xACFF; 0xB000 - 0xB1FF; 0xC2000 - 0xC2FF; 0xCF00 - 0xEFFF; 
+        SAF - 0xFA00 - 0xFA0F (airbags); 0xFA19 - 0xFAFF
+        SSS - 0xFD00 - 0xFEFF
+    """
     io_control_list = []
     id_scan_range = make_did_range(is_oem, is_supplier, is_safety, min_id, max_id)
 
@@ -469,14 +482,29 @@ IOCtrl Params:
                 for did in id_scan_range:
                     if print_results:
                         print("\rProbing service 0x{0:02x} routine ID 0x{1:02x} ({1}/{2})".format(
-                            ServiceID.ROUTINE_CONTROL, did, 0xffff), end="")
+                            ServiceID.INPUT_OUTPUT_CONTROL_BY_IDENTIFIER, did, 0xffff), end="")
                         stdout.flush()
 
-                    response = uds.input_output_control_by_identifier(did, [1, 1, 1, 1, 1, 1, 1, 1, 1, 1])
+                    #Start with no controlMask, but need to guess for correct controlMask size (all 1's)
+                    ## controlMask is one or many bytes.
+                    ### Start with 0, for every 0x13, increase by 1 byte until not 0x13 error.
+                    # BAD_LENGTH (0x13) indicates a retry.
+                    # NOT_SUPPORTED (0x31) indicates not supported.
+                    # Security check indicates security enabled, and supported
+                    # Positive response indicates supported, no security
+                    # Other NRCs indicate supported.
+                    controlOptionRecord = [0x00]
+                    controlEnableMaskRecord = []
+                    response = uds.input_output_control_by_identifier(did,
+                                controlOptionRecord, controlEnableMaskRecord) 
                     if response is None:
-                        #retry
-                        response = uds.routine_control(0x0, routine_id, [1, 1, 1, 1, 1, 1, 1, 1, 1, 1])
-
+                        response = uds.input_output_control_by_identifier(did,
+                                    controlOptionRecord, controlEnableMaskRecord) 
+                    if Iso14229_1.is_positive_response(response):
+                        io_control_list.append([did, "SUPPORTED_NO_SECURITY"])
+                    else:
+                        #TODO: What is the subfunction value??
+                        decode_response(response, ServiceID.INPUT_OUTPUT_CONTROL_BY_IDENTIFIER, 0)
             except KeyboardInterrupt:
                 if print_results:
                     print("Interrupted by user!")
@@ -498,8 +526,8 @@ def make_did_range(is_oem, is_supplier, is_safety, min_id=None, max_id=None):
         #TODO get_sss_range(RID / DID)
         id_range = it.chain(id_range, range(0xf000, 0xfeff+1))
     if is_safety:
-        print("Scanning safety system ranges: \n\t0xfa00 - 0xfa0f
-                \n\t0xfa19 - 0xfaff")
+        print("Scanning safety system ranges: \n\t0xfa00 - 0xfa0f"
+                "\n\t0xfa19 - 0xfaff")
         #TODO get_sss_range(RID / DID)
         id_range = it.chain(id_range, range(0xf000, 0xfeff+1), range(0xfa19,0xfaff+1))
     if min_id is not None or max_id is not None:
@@ -521,6 +549,7 @@ def scan_routine_control(arb_id_request, arb_id_response, timeout=None,
         is_oem=False, is_supplier=False, min_id=None, max_id=None, print_results=True):
     routine_map = []
     routine_id_range = []
+    #TODO : Add safety ranges for routine control
     if is_oem:
         print("Scanning OEM range 0x0200 - 0xdfff")
         routine_id_range = range(0x0200, 0xdfff+1)
@@ -853,7 +882,11 @@ def __security_seed_wrapper(args):
         for seed in seed_list:
             print(seed)
 
-def extended_session(arb_id_request, arb_id_response, session_type):
+def extended_session(arb_id_request, arb_id_response):
+    return diag_session_control(arb_id_request, arb_id_response, 
+        Services.DiagnosticSessionControl.DiagnosticSessionType.EXTENDED_DIAGNOSTIC_SESSION)
+
+def diag_session_control(arb_id_request, arb_id_response, session_type):
     # Sanity checks
     if not Services.DiagnosticSessionControl.DiagnosticSessionType().is_valid_session(session_type):
         raise ValueError("Invalid extended session type: 0x{0:02x}".format(session_type))
@@ -979,28 +1012,50 @@ def __parse_args(args):
 
     # Parser for diagnostics service scan
     parser_servscan = subparsers.add_parser("service_scan")
-    parser_servscan.add_argument("service", type=parse_int_dec_or_hex, help="supported service to scan: 0x31")
-    parser_servscan.add_argument("src", type=parse_int_dec_or_hex, help="arbitration ID to transmit to")
-    parser_servscan.add_argument("dst", type=parse_int_dec_or_hex, help="arbitration ID to listen to")
-    parser_servscan.add_argument("-t", "--timeout", metavar="T", type=float, default=TIMEOUT_SERVICES,
-                             help="wait T seconds for response before timeout (default: {0})".format(TIMEOUT_SERVICES))
+    parser_servscan.add_argument("service", type=parse_int_dec_or_hex, 
+        help="supported service to scan: 0x31")
+    parser_servscan.add_argument("src", type=parse_int_dec_or_hex, 
+        help="arbitration ID to transmit to")
+    parser_servscan.add_argument("dst", type=parse_int_dec_or_hex, 
+        help="arbitration ID to listen to")
+    parser_servscan.add_argument("-t", "--timeout", metavar="T", 
+        type=float, default=TIMEOUT_SERVICES,
+        help="wait T seconds for response before timeout (default: "
+        "{0})".format(TIMEOUT_SERVICES))
     parser_servscan.add_argument("-oem", action="store_true", 
-                             help="Scan vehicle manufacturer specific ranges for applicable services")
+        help="Scan vehicle manufacturer specific ranges for applicable services")
     parser_servscan.add_argument("-sss", action="store_true", 
-                             help="Scan system supplier specific ranges for applicable services")
+        help="Scan system supplier specific ranges for applicable services")
+    parser_servscan.add_argument("-saf", action="store_true",
+        help="Scan safety system specific ranges for applicable services") 
     parser_servscan.add_argument("-min", type=parse_int_dec_or_hex, default=None,
-                                  help="min value to start scanning with")
+        help="min value to start scanning with")
     parser_servscan.add_argument("-max", type=parse_int_dec_or_hex, default=None,
-                                  help="max value to start scanning with")
+        help="max value to start scanning with")
     parser_servscan.set_defaults(func=__service_scan_wrapper)
 
     # Parser for diagnostics service scan
     parser_extservscan = subparsers.add_parser("ext_service_scan")
-    parser_extservscan.add_argument("service", type=parse_int_dec_or_hex, help="supported service to scan: 0x31")
-    parser_extservscan.add_argument("src", type=parse_int_dec_or_hex, help="arbitration ID to transmit to")
-    parser_extservscan.add_argument("dst", type=parse_int_dec_or_hex, help="arbitration ID to listen to")
-    parser_extservscan.add_argument("-t", "--timeout", metavar="T", type=float, default=TIMEOUT_SERVICES,
-                             help="wait T seconds for response before timeout (default: {0})".format(TIMEOUT_SERVICES))
+    parser_extservscan.add_argument("service", type=parse_int_dec_or_hex, 
+        help="supported service to scan: 0x31")
+    parser_extservscan.add_argument("src", type=parse_int_dec_or_hex, 
+        help="arbitration ID to transmit to")
+    parser_extservscan.add_argument("dst", type=parse_int_dec_or_hex, 
+        help="arbitration ID to listen to")
+    parser_extservscan.add_argument("-t", "--timeout", metavar="T", 
+        type=float, default=TIMEOUT_SERVICES,
+        help="wait T seconds for response before timeout (default: "
+                "{0})".format(TIMEOUT_SERVICES))
+    parser_extservscan.add_argument("-oem", action="store_true", 
+        help="Scan vehicle manufacturer specific ranges for applicable services")
+    parser_extservscan.add_argument("-sss", action="store_true", 
+        help="Scan system supplier specific ranges for applicable services")
+    parser_extservscan.add_argument("-saf", action="store_true",
+        help="Scan safety system specific ranges for applicable services") 
+    parser_extservscan.add_argument("-min", type=parse_int_dec_or_hex, default=None,
+        help="min value to start scanning with")
+    parser_extservscan.add_argument("-max", type=parse_int_dec_or_hex, default=None,
+        help="max value to start scanning with")
     parser_extservscan.set_defaults(func=__ext_service_scan_wrapper)
 
 
