@@ -400,17 +400,22 @@ def __ext_service_scan_wrapper(args):
     try:
         #Set to extended mode
         response = extended_session(arb_id_request, arb_id_response)
-        if not decode_response(response, Services.DiagnosticSessionControl.service_id, 
-            Services.DiagnosticSessionControl.DiagnosticSessionType.EXTENDED_DIAGNOSTIC_SESSION):
-            if not Iso14229_1.is_positive_response(response):
-                raise ValueError("Unable to enter extended session")
-            else:
-                print("Entered extended session")
-        else:
+        if not Iso14229_1.is_positive_response(response):
             raise ValueError("Unable to enter extended session")
+        else:
+            print("Entered extended session")
+
         if service == Services.InputOutputControlByIdentifier.service_id:
             found_iocontrols = scan_io_controls(arb_id_request, arb_id_response,
                  timeout, is_oem, is_supplier, is_safety, min_id, max_id)
+            if found_iocontrols:
+                print("")
+                for item in found_iocontrols:
+                    print("IO Control DID 0x{0:02x} : {1}".format(item[0], item[1]))
+
+        '''elif service == Services.
+        TODO: Add check to output help / direct users to services_scan command
+        '''
     except ValueError as e:
         print("\n Extended Service Scan failed: {0}".format(e))
 
@@ -424,7 +429,8 @@ def scan_io_controls(arb_id_request, arb_id_response, timeout=None,
         SSS - 0xFD00 - 0xFEFF
     """
     io_control_list = []
-    id_scan_range = make_did_range(is_oem, is_supplier, is_safety, min_id, max_id)
+    id_scan_range = list(make_did_range(is_oem, is_supplier, is_safety, min_id, max_id))
+    last_scanned_did = None
 
     with IsoTp(arb_id_request=arb_id_request, arb_id_response=arb_id_response) as tp:
         tp.set_filter_single_arbitration_id(arb_id_response)
@@ -432,45 +438,61 @@ def scan_io_controls(arb_id_request, arb_id_response, timeout=None,
             if timeout is not None:
                 uds.P3_CLIENT = timeout
             try:
+                idx = 0
                 for did in id_scan_range:
+                    idx += 1
                     if print_results:
-                        print("\rProbing service 0x{0:02x} routine ID 0x{1:02x} ({1}/{2})".format(
-                            ServiceID.INPUT_OUTPUT_CONTROL_BY_IDENTIFIER, did, 0xffff), end="")
+                        print("\rProbing service 0x{0:02x} data ID"
+                                " 0x{1:02x} ({2}/{3})".format(
+                                ServiceID.INPUT_OUTPUT_CONTROL_BY_IDENTIFIER, 
+                                did, idx, len(id_scan_range)), end="")
+
                         stdout.flush()
 
                     #Start with no controlMask, but need to guess for correct controlMask size (all 1's)
                     ## controlMask is one or many bytes.
-                    ### Start with 0, for every 0x13, increase by 1 byte until not 0x13 error.
-                    # BAD_LENGTH (0x13) indicates a retry.
+                    ### Start with 0, for every NRC 0x13, increase by 1 byte until not NRC 0x13.
+                    # DONE __ BAD_LENGTH (0x13) indicates a retry.
                     # DONE __ NOT_SUPPORTED (0x31) indicates not supported.
                     # DONE __ Security check indicates security enabled, and supported
                     # DONE __ Positive response indicates supported, no security
                     # DONE __ Other NRCs indicate supported.
                     controlOptionRecord = [InputOutputControlParameters.RETURN_CONTROL_TO_ECU]
                     controlEnableMaskRecord = []
-                    response = uds.input_output_control_by_identifier(did,
-                                controlOptionRecord, controlEnableMaskRecord) 
-                    if response is None:
+		
+                    #Arbitrarily picked 10; this could be lower or higher
+                    retry_count = 10 
+                    while retry_count > 0:
+                        #TODO : Report to user how big the controlEnableMaskRecord is
                         response = uds.input_output_control_by_identifier(did,
                                     controlOptionRecord, controlEnableMaskRecord) 
-                    if Iso14229_1.is_positive_response(response):
-                        io_control_list.append([did, "SUPPORTED_NO_SECURITY"])
-                    else:
-                        #TODO: What is the subfunction value??
-                        decode_response(response, ServiceID.INPUT_OUTPUT_CONTROL_BY_IDENTIFIER, 0)
-                        if response[2] is NegativeResponseCodes.INCORRECT_MESSAGE_LENGTH_OR_INVALID_FORMAT:
-                            #Increase controlEnableMaskRecord and RETRY 
-                            #TODO: Establish retry strategy 
-                        elif response[2] is NegativeResponseCodes.REQUEST_OUT_OF_RANGE:
-                            #Do nothing. Not supported.
-                            pass
-                        elif response[2] is NegativeResponseCodes.SECURITY_ACCESS_DENIED:
-                            io_control_list.append([routine_id, "SUPPORTED_SECURITY_ACCESS_DENIED"])
-                        else:
+                        if response is None:
+                            response = uds.input_output_control_by_identifier(did,
+                                        controlOptionRecord, controlEnableMaskRecord) 
+                        if Iso14229_1.is_positive_response(response):
                             io_control_list.append([did, "SUPPORTED_NO_SECURITY"])
+                            retry_count = 0
+                        else:
+                            if response[2] is NegativeResponseCodes.INCORRECT_MESSAGE_LENGTH_OR_INVALID_FORMAT:
+                                #Increase controlEnableMaskRecord and RETRY 
+                                controlEnableMaskRecord += [0xff]
+                                retry_count -= 1
+                            elif response[2] is NegativeResponseCodes.REQUEST_OUT_OF_RANGE:
+                                #Do nothing. Not supported.
+                                retry_count = 0
+                                pass
+                            elif response[2] is NegativeResponseCodes.SECURITY_ACCESS_DENIED:
+                                io_control_list.append([did, "SUPPORTED_SECURITY_ACCESS_DENIED"])
+                                retry_count = 0
+                            else:
+                                io_control_list.append([did, "SUPPORTED_NO_SECURITY"])
+                                retry_count = 0
+                    last_scanned_did = did
             except KeyboardInterrupt:
                 if print_results:
-                    print("Interrupted by user!")
+                    print("\nInterrupted by user!")
+                    if last_scanned_did is not None:
+                        print("\nLast scanned DID : {0:02x}".format(did))
 
     return io_control_list
 
