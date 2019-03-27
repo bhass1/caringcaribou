@@ -472,6 +472,9 @@ def scan_io_controls(arb_id_request, arb_id_response, timeout=None,
                         if Iso14229_1.is_positive_response(response):
                             io_control_list.append([did, "SUPPORTED_NO_SECURITY"])
                             retry_count = 0
+                        elif response is None:
+                                retry_count = 0
+                                pass
                         else:
                             if response[2] is NegativeResponseCodes.INCORRECT_MESSAGE_LENGTH_OR_INVALID_FORMAT:
                                 #Increase controlEnableMaskRecord and RETRY 
