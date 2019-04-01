@@ -339,7 +339,7 @@ def __service_scan_wrapper(args):
     """Wrapper used to initiate a supported service scan"""
     arb_id_request = args.src
     arb_id_response = args.dst
-    service = args.service
+    service_id = args.service
     timeout = args.timeout
     is_oem = args.oem
     is_safety = args.saf
@@ -348,14 +348,14 @@ def __service_scan_wrapper(args):
     max_id = args.max
     try:
         #Services available to defaultSession: SessionControl; ECUReset; TesterPresent; ResponseOnEvent; ReadDID; ReadMemory; ReadScalingData; DynamicallyDefineDID; WriteDID; WriteMemory; ClearDiagnosticInfo; ReadDTCInfo; RoutineControl.
-        if service == Services.DiagnosticSessionControl.service_id:
+        if service_id == Services.DiagnosticSessionControl.service_id:
             found_sub_funcs = scan_session_control(arb_id_request, arb_id_response, timeout)
             # Print results
             if found_sub_funcs:
                 for sub_func in found_sub_funcs:
                     session_type = Services.DiagnosticSessionControl.DiagnosticSessionType().get_name(sub_func)
-                    print("Supported service (0x{0:02x}) sub-function 0x{1:02x}: {2}".format(service, sub_func, session_type))
-        elif service == ServiceID.WRITE_MEMORY_BY_ADDRESS:
+                    print("Supported service (0x{0:02x}) sub-function 0x{1:02x}: {2}".format(service_id, sub_func, session_type))
+        elif service_id == ServiceID.WRITE_MEMORY_BY_ADDRESS:
             #First find all applicable "addressAndLengthFormatIdentifier"
                 #Do this by purposely triggering NRC 0x13 by improper total length (e.g. leave off data bytes)
                 #There are 4-bits for address and length sizes
@@ -365,7 +365,7 @@ def __service_scan_wrapper(args):
             #valid_memory_write
             service_name = ServiceID.NAMES.get(service_id, "Unknown service")
             print("Service 0x{0:02x}: {1} not supported at this time...".format(service_id, service_name))
-        elif service == ServiceID.ROUTINE_CONTROL:
+        elif service_id == ServiceID.ROUTINE_CONTROL:
             print("Routine Control Scan")
             #TODO : Add safety ranges for routine control
             routine_map = scan_routine_control(arb_id_request, arb_id_response, timeout, is_oem, is_supplier, min_id, max_id)
@@ -379,7 +379,7 @@ def __service_scan_wrapper(args):
             service_name = ServiceID.NAMES.get(service_id, "Unknown service")
             print("Service 0x{0:02x}: {1} not supported at this time...".format(service_id, service_name))
 
-        '''elif service == Services.
+        '''elif service_id == Services.
         TODO: Add check to direct users to services_scan_ext command
         '''
     except ValueError as e:
