@@ -14,38 +14,6 @@ import itertools as it
 if version_info[0] == 2:
     range = xrange
 
-UDS_SERVICE_NAMES = {
-    0x10: "DIAGNOSTIC_SESSION_CONTROL",
-    0x11: "ECU_RESET",
-    0x14: "CLEAR_DIAGNOSTIC_INFORMATION",
-    0x19: "READ_DTC_INFORMATION",
-    0x20: "RETURN_TO_NORMAL",
-    0x22: "READ_DATA_BY_IDENTIFIER",
-    0x23: "READ_MEMORY_BY_ADDRESS",
-    0x24: "READ_SCALING_DATA_BY_IDENTIFIER",
-    0x27: "SECURITY_ACCESS",
-    0x28: "COMMUNICATION_CONTROL",
-    0x2A: "READ_DATA_BY_PERIODIC_IDENTIFIER",
-    0x2C: "DYNAMICALLY_DEFINE_DATA_IDENTIFIER",
-    0x2D: "DEFINE_PID_BY_MEMORY_ADDRESS",
-    0x2E: "WRITE_DATA_BY_IDENTIFIER",
-    0x2F: "INPUT_OUTPUT_CONTROL_BY_IDENTIFIER",
-    0x31: "ROUTINE_CONTROL",
-    0x34: "REQUEST_DOWNLOAD",
-    0x35: "REQUEST_UPLOAD",
-    0x36: "TRANSFER_DATA",
-    0x37: "REQUEST_TRANSFER_EXIT",
-    0x38: "REQUEST_FILE_TRANSFER",
-    0x3D: "WRITE_MEMORY_BY_ADDRESS",
-    0x3E: "TESTER_PRESENT",
-    0x7F: "NEGATIVE_RESPONSE",
-    0x83: "ACCESS_TIMING_PARAMETER",
-    0x84: "SECURED_DATA_TRANSMISSION",
-    0x85: "CONTROL_DTC_SETTING",
-    0x86: "RESPONSE_ON_EVENT",
-    0x87: "LINK_CONTROL"
-}
-
 NRC_NAMES = {
     0x00: "POSITIVE_RESPONSE",
     0x10: "GENERAL_REJECT",
@@ -331,7 +299,7 @@ def __service_discovery_wrapper(args):
     found_services = service_discovery(arb_id_request, arb_id_response, timeout)
     # Print results
     for service_id in found_services:
-        service_name = UDS_SERVICE_NAMES.get(service_id, "Unknown service")
+        service_name = ServiceID.NAMES.get(service_id, "Unknown service")
         print("Supported service 0x{0:02x}: {1}".format(service_id, service_name))
 
 
@@ -816,7 +784,7 @@ def print_negative_response(response):
     :return: Nothing
     """
     nrc = response[2]
-    nrc_description = NRC_NAMES.get(nrc, "Unknown NRC value")
+    nrc_description = NegativeResponseCodes.NAMES.get(nrc, "Unknown NRC value")
     print("Received negative response code (NRC) 0x{0:02x}: {1}"
                 .format(nrc, nrc_description))
 

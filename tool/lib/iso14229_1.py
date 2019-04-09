@@ -17,7 +17,7 @@ class InputOutputControlParameters(object):
         Details of controlState bytes in request: 0 bytes
         Details of controlState bytes in positive response: Equal to the size
         and format of the dataIdentifier's dataRecord
-    
+
         0x01 - resetToDefault
         This value shall indicate to the server that it is requested to reset the
         input signal(s), internal parameter(s) and/or output signal(s)
@@ -25,7 +25,7 @@ class InputOutputControlParameters(object):
         Details of controlState bytes in request: 0 bytes
         Details of controlState bytes in positive. response: Equal to the size
         and format of the dataIdentifier's dataRecord
-    
+
         0x02 - freezeCurrentState
         This value shall indicate to the server that it is requested to freeze the
         current state of the input signal(s), internal parameter(s) and/or output
@@ -33,7 +33,7 @@ class InputOutputControlParameters(object):
         Details of controlState bytes in request: 0 bytes
         Details of controlState bytes in positive. response: Equal to the size
         and format of the dataIdentifier's dataRecord
-    
+
         0x03 - shortTermAdjustment
         This value shall indicate to the server that it is requested to adjust the
         input signal(s), internal parameter(s) and/or controlled output signal(s)
@@ -45,8 +45,8 @@ class InputOutputControlParameters(object):
         of the dataIdentifier's dataRecord
         Details of controlState bytes in pos. response: Equal to the size and
         format of the dataIdentifier's dataRecord
-    
-        0x04 - 0xFF ISOSAEReserved 
+
+        0x04 - 0xFF ISOSAEReserved
         This value is reserved by this document for future definition.
     """
     RETURN_CONTROL_TO_ECU = 0x00
@@ -165,6 +165,7 @@ class ServiceID(object):
     """
     ISO-14229-1 service ID definitions
     """
+    #0x00 - 0x0F Undefined
     DIAGNOSTIC_SESSION_CONTROL = 0x10
     ECU_RESET = 0x11
     CLEAR_DIAGNOSTIC_INFORMATION = 0x14
@@ -186,12 +187,25 @@ class ServiceID(object):
     REQUEST_FILE_TRANSFER = 0x38
     WRITE_MEMORY_BY_ADDRESS = 0x3D
     TESTER_PRESENT = 0x3E
+    #0x3F Reserved by ISO14229-1
+    #0x40 - 0x4F Undefined
+    #0x50 - 0x7E Responses to 0x10-0x3E (Each request msg has ServiceID bit
+    #            6 = 0. All positive response msgs have ServiceID bit 6 = 1)
+    #0x7F Reserved for Negative Response Service Identifier
+    #0x80 - 0x82 Reserved by ISO 14229-1
     ACCESS_TIMING_PARAMETER = 0x83
     SECURED_DATA_TRANSMISSION = 0x84
     CONTROL_DTC_SETTING = 0x85
     RESPONSE_ON_EVENT = 0x86
     LINK_CONTROL = 0x87
-    
+    #0x88 ISO 14229-1 service request
+    #0x89 - 0xB9 Reserved by ISO 14229-1
+    #0xBA - 0xBE Defined by System Supplier
+    #0xC3 - 0xC8 Responses to 0x83-0x88
+    #0xC9 - 0xF9 Reserved by ISO 14229-1
+    #0xFA - 0xFE Responses to 0xBA - 0xBE
+    #0xFF - Reserved by ISO 14229-1
+
     NAMES = {
         0x10: "DIAGNOSTIC_SESSION_CONTROL",
         0x11: "ECU_RESET",
