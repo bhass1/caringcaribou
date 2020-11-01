@@ -454,6 +454,42 @@ class Iso14229_1(object):
 
         return response
 
+    def clear_all_dtcs(self):
+        """
+        Clears all DTCs a particular server has
+
+        :return: Response data if successful,
+                 None otherwise
+        """
+        request = [0] * 4
+        request[0] = ServiceID.CLEAR_DIAGNOSTIC_INFORMATION
+        request[1] = 0xff #defined by OEM, 0xff = all
+        request[2] = 0xff #defined by OEM, 0xff = all
+        request[3] = 0xff #defined by OEM, 0xff = all
+
+        self.tp.send_request(request)
+        response = self.receive_response(self.P3_CLIENT)
+
+        return response
+
+
+    def read_dtc_count(self):
+        """
+        Reads number of DTCs a particular server has
+
+        :return: Response data if successful,
+                 None otherwise
+        """
+        request = [0] * 3
+        request[0] = ServiceID.READ_DTC_INFORMATION
+        request[1] = 0x01 #reportNumberofDTCbyStatusMask
+        request[2] = 0xff #bitwise AND mask, 0xff = all
+
+        self.tp.send_request(request)
+        response = self.receive_response(self.P3_CLIENT)
+
+        return response
+
     def security_access_request_seed(self, level, data_record):
         """
         Sends a Security Access "Request seed" message for 'level'

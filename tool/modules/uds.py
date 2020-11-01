@@ -265,6 +265,13 @@ def __uds_discovery_wrapper(args):
             print(table_line)
             for (client_id, server_id) in arb_id_pairs:
                 print("| 0x{0:08x} | 0x{1:08x} |".format(client_id, server_id))
+                with IsoTp(arb_id_request=client_id,
+                           arb_id_response=server_id) as tp:
+                    # Setup filter for incoming messages
+                    tp.set_filter_single_arbitration_id(server_id)
+                    with Iso14229_1(tp) as uds:
+                        resp = uds.clear_all_dtcs()
+                        print(resp)
             print(table_line)
     except ValueError as e:
         print("Discovery failed: {0}".format(e))
